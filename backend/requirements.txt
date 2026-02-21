@@ -5,3 +5,8 @@ geopy
 httpx
 shapely
 sqlalchemy
+python-jose[cryptography]
+passlib[bcrypt]
+python-multipart
+authlib
+itsdangerous
