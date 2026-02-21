@@ -1,0 +1,15 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# SQLite
+*.db
+
+# Node
+frontend/node_modules/
+frontend/dist/
+
+# Env
+.env
+frontend/.env
