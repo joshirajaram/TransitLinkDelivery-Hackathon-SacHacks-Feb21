@@ -1,8 +1,8 @@
 # 🚌 Transit-Link Delivery
 
-**SacHacks 2025 Hackathon Project**
+**SacHacks 2026 Hackathon Project**
 
-A sustainable, low-cost delivery platform that uses UC Davis Unitrans buses as middle-mile infrastructure to help downtown Davis restaurants escape high DoorDash fees.
+A sustainable, low-cost delivery platform that uses the ASUCD Unitrans network as middle‑mile infrastructure to help downtown Davis restaurants escape high DoorDash fees.
 
 ## 🎯 The Problem
 
@@ -14,26 +14,27 @@ Downtown Davis restaurants struggle with:
 
 ## 💡 Our Solution
 
-**"Aggie Express Delivery"** - A DDBA-hosted platform where:
-- Restaurants pay **0% commission** on food, only flat delivery fees ($1.50)
-- Unitrans buses carry orders during fixed time windows (Lunch & Dinner)
-- Student "delivery stewards" manage orders on buses, creating campus jobs
-- Students pick up orders at nearby bus stops with QR authentication
-- Low-carbon, cost-efficient delivery using existing transit infrastructure
+**TransitLink Delivery** - A DDBA-hosted platform where:
+- Restaurants pay **0% commission** on food, only a flat delivery fee
+- The extremely well‑connected ASUCD Unitrans network powers delivery through downtown and across the city
+- Customers share their location; the system assigns the closest downtown‑serving stop and a compatible route
+- Student stewards manage on‑bus handoff with QR verification
+- Live tracking uses the public Unitrans feed once an order is ON_BUS
 
 ## 🏗️ Architecture
 
 ### Backend (FastAPI + SQLite)
-- **Real-time Unitrans bus tracking** via Umo IQ XML feed
-- Complete order management system
-- Restaurant menu and order processing
-- QR code generation and verification
+- **Static route assignment** using Unitrans routeConfig and a downtown‑route map
+- **Live Unitrans tracking** via the public Umo IQ XML feed (ON_BUS only)
+- Order lifecycle management with role‑based permissions
+- QR code generation and steward scan verification
 - RESTful API with automatic documentation
 
 ### Frontend (React + TypeScript + Vite)
-- **Student ordering interface** - Browse restaurants, select items, choose stops/windows
-- **Steward scanning interface** - Verify QR codes and complete deliveries
-- **Restaurant dashboard** - Manage orders and update status
+- **Student ordering interface** - Browse restaurants, select items, set location for nearest downtown stop
+- **Steward scanning interface** - Scan to mark ON_BUS and scan again to complete
+- **Restaurant dashboard** - Accept/decline and mark READY_FOR_PICKUP
+- **Unitrans manager view** - Route‑filtered active and completed orders
 - **Live map view** - Real-time Unitrans bus locations
 
 ## 🚀 Quick Start
@@ -78,25 +79,24 @@ Frontend will be available at `http://localhost:5173`
 ### Student Journey
 1. Browse downtown restaurants and menus
 2. Add items to order
-3. Select nearest Unitrans stop
-4. Choose delivery window (Lunch 12-2pm or Dinner 6-8pm)
-5. Receive QR code for pickup
-6. Go to bus stop during window
-7. Show QR to steward and collect order
+3. Share location or pin it on the map
+4. System assigns the closest downtown‑serving stop and route
+5. Choose delivery window
+6. Receive QR code for pickup
+7. Track live status; show QR at handoff
 
 ### Restaurant Journey
 1. Receive order notification
-2. Update status: PREPARING → READY_FOR_PICKUP
-3. Hand order to steward when Unitrans arrives
-4. Track delivery completion
+2. Accept or decline the order
+3. Update status: PREPARING → READY_FOR_PICKUP
+4. Hand order to steward when Unitrans arrives
 
 ### Steward Journey
 1. Log in to steward interface
 2. Pick up orders from restaurants
-3. Mark orders as ON_BUS
+3. Scan QR to mark ON_BUS (route verified)
 4. Navigate to designated stops
-5. Scan student QR codes to verify
-6. Hand over orders and mark COMPLETED
+5. Scan again at drop‑off to mark COMPLETED
 
 ## 🎨 Features
 
@@ -106,9 +106,9 @@ Frontend will be available at `http://localhost:5173`
 - [x] QR code generation and verification
 - [x] Restaurant dashboard with real-time updates
 - [x] Steward scanning interface
-- [x] Fixed time windows (Lunch & Dinner)
-- [x] Unitrans stop selection
-- [x] Real-time bus tracking
+- [x] Location-based nearest stop assignment
+- [x] Downtown route mapping via Unitrans routeConfig
+- [x] Real-time bus tracking (ON_BUS)
 - [x] Order status tracking
 - [x] Responsive UI design
 
@@ -117,7 +117,7 @@ Frontend will be available at `http://localhost:5173`
 - [ ] Real QR scanner (camera integration)
 - [ ] Push notifications for order updates
 - [ ] Payment integration (Stripe)
-- [ ] Route optimization for multiple stops
+- [ ] Route optimization for multi-order batches
 - [ ] Analytics dashboard for ASUCD
 - [ ] Student feedback system
 - [ ] Multi-restaurant batching
@@ -158,12 +158,17 @@ Once the backend is running, visit:
 
 ### Key Endpoints
 - `GET /restaurants` - List all restaurants with menus
+- `GET /restaurants/my-restaurant` - Restaurant owner profile
 - `GET /stops` - List Unitrans stops
+- `POST /stops/closest-downtown` - Closest downtown-serving stop for a location
 - `GET /windows` - List delivery windows
 - `POST /orders` - Create new order
 - `GET /orders/{id}` - Get order details
+- `GET /orders/my` - Student order history
 - `PATCH /orders/{id}/status` - Update order status
+- `GET /orders/{id}/qr-code` - QR code image
 - `POST /steward/scan` - Verify QR code
+- `GET /steward/orders` - Route-filtered steward orders
 - `GET /bus-locations` - Real-time bus positions
 
 ## 🏆 Hackathon Pitch
@@ -178,7 +183,7 @@ Once the backend is running, visit:
 - At 100 orders/day: $36,500/year revenue
 
 **Scalability:**
-- Start with 2 time windows, 3 stops
+- Start with 2 time windows
 - Expand to all Unitrans routes
 - Add groceries, bakeries, retail
 - Partner with other university transit systems
@@ -186,15 +191,14 @@ Once the backend is running, visit:
 ## 📊 Demo Data
 
 Seeded automatically on first run:
-- **1 Restaurant**: Downtown Tacos
-- **4 Menu Items**: Veggie Taco, Chicken Taco, Fish Taco, Burrito
-- **3 Unitrans Stops**: Memorial Union, Silo Terminal, ARC
-- **2 Time Windows**: Lunch (12-2pm), Dinner (6-8pm)
-- **3 Users**: Student, Restaurant Owner, Steward
+- **10 Restaurants** with menus across cuisines
+- **Multiple Unitrans Stops**, including downtown‑area stops
+- **2 Delivery Windows**: Lunch and Dinner
+- **Demo Users**: Student, Restaurant Owners, Steward, Admin
 
 ## 🤝 Team
 
-Built for SacHacks 2025 to address the Davis Downtown Business Association challenge.
+Built for SacHacks 2026 to address the Davis Downtown Business Association challenge.
 
 ## 📝 License
 
