@@ -595,6 +595,7 @@ class OrderItemOut(BaseModel):
 class OrderOut(BaseModel):
     id: int
     student_id: int
+    student_name: str
     restaurant_id: int
     restaurant_name: str
     stop: StopOut
@@ -726,6 +727,7 @@ def get_dashboard_data(
         OrderOut(
             id=order.id,
             student_id=order.student_id,
+            student_name=order.student.name,
             restaurant_id=order.restaurant_id,
             restaurant_name=order.restaurant.name,
             stop=StopOut.model_validate(order.stop),
@@ -1072,42 +1074,51 @@ def create_order(
 
     # Try to assign a bus using the matching algorithm
     try:
-        # Get current bus locations from global state
+        # Get current bus locations from cache
         active_buses = [
             {
-                "bus_id": str(bl.id),
-                "lat": bl.lat,
-                "lon": bl.lon,
-                "route": bl.route,
-                "last_updated": bl.timestamp,
+                "id": bl.vehicle_id,
+                "latitude": bl.latitude,
+                "longitude": bl.longitude,
+                "route_tag": bl.route_tag,
+                "route_name": bl.route_tag,
             }
-            for bl in latest_bus_locations.values()
+            for bl in bus_location_cache
         ]
+        
+        # Get route configuration for accurate ETA calculation
+        route_config = get_route_config()
         
         # Find best bus for this order
         best_bus = find_best_bus_for_order(
-            order_id=order.id,
-            restaurant_location=(restaurant.latitude, restaurant.longitude),
-            delivery_location=(stop.latitude, stop.longitude),
-            order_ready_time=datetime.now() + timedelta(minutes=15),  # Assume 15 min prep time
-            delivery_window_start=datetime.now() + timedelta(minutes=window.window_start_mins),
-            delivery_window_end=datetime.now() + timedelta(minutes=window.window_end_mins),
+            order={"id": order.id, "created_at": order.created_at},
+            restaurant={"latitude": restaurant.latitude, "longitude": restaurant.longitude},
+            delivery_stop={"latitude": stop.latitude, "longitude": stop.longitude},
+            delivery_window={
+                "start_time": (datetime.now() + timedelta(minutes=window.window_start_mins)).time(),
+                "end_time": (datetime.now() + timedelta(minutes=window.window_end_mins)).time()
+            },
             active_buses=active_buses,
+            prep_time_minutes=15,
+            route_config=route_config
         )
         
         if best_bus:
-            logger.info(f"Order {order.id} matched to bus {best_bus['bus_id']} with confidence {best_bus['confidence']}")
-            order.bus_id = str(best_bus.get("bus_id"))
+            logger.info(f"Order {order.id} matched to bus {best_bus.bus_id} (route: {best_bus.route_name}) with confidence {best_bus.confidence_score:.1f}")
+            order.bus_id = best_bus.bus_id
+            order.bus_route_tag = best_bus.route_name
+            order.estimated_delivery_time = best_bus.estimated_delivery_time
             db.commit()
             db.refresh(order)
     except Exception as e:
-        logger.error(f"Failed to assign bus to order {order.id}: {e}")
+        logger.error(f"Failed to assign bus to order {order.id}: {e}", exc_info=True)
         # Continue without bus assignment - can be done later
 
     # Build response
     return OrderOut(
         id=order.id,
         student_id=order.student_id,
+        student_name=current_user.name,
         restaurant_id=order.restaurant_id,
         restaurant_name=restaurant.name,
         stop=StopOut.model_validate(stop),
@@ -1146,6 +1157,7 @@ def get_my_orders(
         OrderOut(
             id=order.id,
             student_id=order.student_id,
+            student_name=order.student.name,
             restaurant_id=order.restaurant_id,
             restaurant_name=order.restaurant.name,
             stop=StopOut.model_validate(order.stop),
@@ -1192,6 +1204,7 @@ def restaurant_orders(
             OrderOut(
                 id=order.id,
                 student_id=order.student_id,
+                student_name=order.student.name,
                 restaurant_id=order.restaurant_id,
                 restaurant_name=order.restaurant.name,
                 stop=StopOut.model_validate(order.stop),
@@ -1290,6 +1303,7 @@ def update_order_status(
     return OrderOut(
         id=order.id,
         student_id=order.student_id,
+        student_name=order.student.name,
         restaurant_id=order.restaurant_id,
         restaurant_name=order.restaurant.name,
         stop=StopOut.model_validate(order.stop),
@@ -1360,6 +1374,7 @@ def steward_scan(
     return OrderOut(
         id=order.id,
         student_id=order.student_id,
+        student_name=order.student.name,
         restaurant_id=order.restaurant_id,
         restaurant_name=order.restaurant.name,
         stop=StopOut.model_validate(order.stop),
@@ -1410,6 +1425,7 @@ async def get_steward_orders(
         return OrderOut(
             id=order.id,
             student_id=order.student_id,
+            student_name=order.student.name,
             restaurant_id=order.restaurant_id,
             restaurant_name=order.restaurant.name,
             stop=StopOut.model_validate(order.stop),
@@ -1462,6 +1478,7 @@ def get_order(
     return OrderOut(
         id=order.id,
         student_id=order.student_id,
+        student_name=order.student.name,
         restaurant_id=order.restaurant_id,
         restaurant_name=order.restaurant.name,
         stop=StopOut.model_validate(order.stop),

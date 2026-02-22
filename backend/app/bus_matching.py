@@ -37,14 +37,179 @@ def calculate_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> fl
     return geodesic((lat1, lon1), (lat2, lon2)).kilometers
 
 
+def find_closest_stop_on_route(
+    bus_lat: float,
+    bus_lon: float,
+    route_stops: List[Dict[str, Any]]
+) -> Optional[int]:
+    """
+    Find the index of the closest stop to the bus's current location on its route.
+    
+    Args:
+        bus_lat: Bus latitude
+        bus_lon: Bus longitude
+        route_stops: List of stops with 'lat' and 'lon' keys
+    
+    Returns:
+        Index of closest stop, or None if no stops available
+    """
+    if not route_stops:
+        return None
+    
+    min_distance = float('inf')
+    closest_idx = 0
+    
+    for idx, stop in enumerate(route_stops):
+        try:
+            stop_lat = float(stop.get('lat', 0))
+            stop_lon = float(stop.get('lon', 0))
+            distance = calculate_distance(bus_lat, bus_lon, stop_lat, stop_lon)
+            if distance < min_distance:
+                min_distance = distance
+                closest_idx = idx
+        except (ValueError, TypeError):
+            continue
+    
+    return closest_idx
+
+
+def find_stop_index_by_coords(
+    target_lat: float,
+    target_lon: float,
+    route_stops: List[Dict[str, Any]],
+    max_distance_km: float = 0.2  # 200 meters tolerance
+) -> Optional[int]:
+    """
+    Find the index of a stop matching the given coordinates.
+    
+    Args:
+        target_lat: Target stop latitude
+        target_lon: Target stop longitude
+        route_stops: List of stops with 'lat' and 'lon' keys
+        max_distance_km: Maximum distance to consider a match
+    
+    Returns:
+        Index of matching stop, or None if no match found
+    """
+    if not route_stops:
+        return None
+    
+    for idx, stop in enumerate(route_stops):
+        try:
+            stop_lat = float(stop.get('lat', 0))
+            stop_lon = float(stop.get('lon', 0))
+            distance = calculate_distance(target_lat, target_lon, stop_lat, stop_lon)
+            if distance <= max_distance_km:
+                return idx
+        except (ValueError, TypeError):
+            continue
+    
+    return None
+
+
+def calculate_stops_between(
+    from_idx: int,
+    to_idx: int,
+    total_stops: int
+) -> int:
+    """
+    Calculate number of stops between two positions on a route.
+    Handles circular routes by taking the shorter path.
+    
+    Args:
+        from_idx: Starting stop index
+        to_idx: Destination stop index
+        total_stops: Total number of stops on the route
+    
+    Returns:
+        Number of stops between the two positions
+    """
+    if from_idx == to_idx:
+        return 0
+    
+    # Calculate forward distance
+    if to_idx > from_idx:
+        forward = to_idx - from_idx
+    else:
+        # Wrap around
+        forward = (total_stops - from_idx) + to_idx
+    
+    # Calculate backward distance
+    if from_idx > to_idx:
+        backward = from_idx - to_idx
+    else:
+        # Wrap around
+        backward = (total_stops - to_idx) + from_idx
+    
+    # Return shorter path
+    return min(forward, backward)
+
+
 def estimate_bus_arrival_time(
     bus_lat: float,
     bus_lon: float,
     dest_lat: float,
     dest_lon: float,
-    avg_speed_kmh: float = 20.0  # Average urban bus speed
+    avg_speed_kmh: float = 20.0,  # Average urban bus speed (fallback)
+    route_config: Optional[List[Dict[str, Any]]] = None,
+    route_id: Optional[str] = None,
+    avg_minutes_per_stop: float = 3.0  # Average time per bus stop including dwell
 ) -> datetime:
-    """Estimate when a bus will arrive at a destination"""
+    """
+    Estimate when a bus will arrive at a destination.
+    
+    If route_config and route_id are provided, uses stop-based calculation.
+    Otherwise falls back to distance-based calculation.
+    
+    Args:
+        bus_lat: Current bus latitude
+        bus_lon: Current bus longitude
+        dest_lat: Destination latitude
+        dest_lon: Destination longitude
+        avg_speed_kmh: Average speed for distance-based fallback
+        route_config: List of routes with stop sequences
+        route_id: ID of the bus route to use for stop calculation
+        avg_minutes_per_stop: Average time per stop (including travel + dwell)
+    
+    Returns:
+        Estimated arrival datetime
+    """
+    # Try stop-based calculation if route config is available
+    if route_config and route_id:
+        try:
+            # Find the route matching the route_id
+            matching_route = None
+            for route in route_config:
+                if route.get('id') == route_id or route.get('tag') == route_id:
+                    matching_route = route
+                    break
+            
+            if matching_route and matching_route.get('stops'):
+                route_stops = matching_route['stops']
+                
+                # Find bus's current stop index
+                bus_stop_idx = find_closest_stop_on_route(bus_lat, bus_lon, route_stops)
+                
+                # Find destination stop index
+                dest_stop_idx = find_stop_index_by_coords(dest_lat, dest_lon, route_stops)
+                
+                if bus_stop_idx is not None and dest_stop_idx is not None:
+                    # Calculate stops between current position and destination
+                    stops_count = calculate_stops_between(
+                        bus_stop_idx,
+                        dest_stop_idx,
+                        len(route_stops)
+                    )
+                    
+                    # Calculate ETA based on stops
+                    travel_time_minutes = stops_count * avg_minutes_per_stop
+                    return datetime.now() + timedelta(minutes=travel_time_minutes)
+        
+        except (KeyError, ValueError, TypeError) as e:
+            # Fall through to distance-based calculation
+            pass
+    
+    # Fallback: distance-based calculation
     distance = calculate_distance(bus_lat, bus_lon, dest_lat, dest_lon)
     travel_time_hours = distance / avg_speed_kmh
     travel_time_minutes = travel_time_hours * 60
@@ -113,7 +278,8 @@ def find_best_bus_for_order(
     delivery_stop: Dict[str, Any],
     delivery_window: Dict[str, Any],
     active_buses: List[Dict[str, Any]],
-    prep_time_minutes: int = 15
+    prep_time_minutes: int = 15,
+    route_config: Optional[List[Dict[str, Any]]] = None
 ) -> Optional[BusMatch]:
     """
     Find the best bus to deliver an order
@@ -125,6 +291,7 @@ def find_best_bus_for_order(
         delivery_window: Time window (start_time, end_time)
         active_buses: List of currently running buses with GPS data
         prep_time_minutes: Estimated food preparation time
+        route_config: Optional route configuration with stop sequences for accurate ETA
     
     Returns:
         BusMatch object with best bus assignment, or None if no suitable bus
@@ -152,15 +319,22 @@ def find_best_bus_for_order(
             delivery_stop['latitude'], delivery_stop['longitude']
         )
         
-        # Estimate timing
+        # Get bus route identifier for stop-based ETA calculation
+        bus_route_id = bus.get('route_tag') or bus.get('route') or bus.get('route_name')
+        
+        # Estimate timing with stop-based calculation if route config available
         pickup_time = estimate_bus_arrival_time(
             bus['latitude'], bus['longitude'],
-            restaurant['latitude'], restaurant['longitude']
+            restaurant['latitude'], restaurant['longitude'],
+            route_config=route_config,
+            route_id=bus_route_id
         )
         
         delivery_time = estimate_bus_arrival_time(
             restaurant['latitude'], restaurant['longitude'],
-            delivery_stop['latitude'], delivery_stop['longitude']
+            delivery_stop['latitude'], delivery_stop['longitude'],
+            route_config=route_config,
+            route_id=bus_route_id
         )
         
         # Calculate match score
@@ -203,10 +377,16 @@ def find_best_bus_for_order(
 
 def assign_orders_to_buses(
     pending_orders: List[Dict[str, Any]],
-    active_buses: List[Dict[str, Any]]
+    active_buses: List[Dict[str, Any]],
+    route_config: Optional[List[Dict[str, Any]]] = None
 ) -> Dict[str, List[Dict[str, Any]]]:
     """
     Assign multiple orders to available buses optimally
+    
+    Args:
+        pending_orders: List of pending orders to assign
+        active_buses: List of currently active buses
+        route_config: Optional route configuration for accurate ETA calculation
     
     Returns:
         Dictionary mapping bus_id to list of assigned orders
@@ -221,7 +401,8 @@ def assign_orders_to_buses(
             order['restaurant'],
             order['stop'],
             order['window'],
-            active_buses
+            active_buses,
+            route_config=route_config
         )
         
         if best_match:

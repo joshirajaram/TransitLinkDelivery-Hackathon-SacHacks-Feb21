@@ -4,11 +4,11 @@ import 'mapbox-gl/dist/mapbox-gl.css';
 import { apiClient, Restaurant, Stop, Window, Order, User, BusLocation, ClosestStopResponse } from './api';
 import { QRCode } from 'react-qrcode-logo';
 
-type StudentOrderProps = {
+type UserOrderProps = {
   mode?: 'track' | 'place';
 };
 
-export default function StudentOrder({ mode = 'place' }: StudentOrderProps) {
+export default function UserOrder({ mode = 'place' }: UserOrderProps) {
   const [restaurants, setRestaurants] = useState<Restaurant[]>([]);
   const [stops, setStops] = useState<Stop[]>([]);
   const [windows, setWindows] = useState<Window[]>([]);
@@ -21,6 +21,7 @@ export default function StudentOrder({ mode = 'place' }: StudentOrderProps) {
   const [quantities, setQuantities] = useState<Record<number, number>>({});
   const [orders, setOrders] = useState<Order[]>([]);
   const [ordersLoading, setOrdersLoading] = useState(false);
+  const [ordersError, setOrdersError] = useState<string | null>(null);
   const [lastOrdersRefresh, setLastOrdersRefresh] = useState<Date | null>(null);
   const [busLocations, setBusLocations] = useState<BusLocation[]>([]);
   const [busLoading, setBusLoading] = useState(false);
@@ -48,8 +49,9 @@ export default function StudentOrder({ mode = 'place' }: StudentOrderProps) {
       const res = await apiClient.getMyOrders();
       setOrders(res.data);
       setLastOrdersRefresh(new Date());
+      setOrdersError(null);
     } catch (err: any) {
-      setError(err.response?.data?.detail || 'Failed to load orders');
+      setOrdersError(err.response?.data?.detail || 'Failed to load orders');
     } finally {
       if (showLoading) {
         setOrdersLoading(false);
@@ -206,12 +208,18 @@ export default function StudentOrder({ mode = 'place' }: StudentOrderProps) {
         window_id: selectedWindow,
         items,
       });
+      // Add order to local state immediately and refresh from server
       setOrders(prev => [res.data, ...prev]);
-      refreshOrders(false);
       setOrderSuccess(res.data);
       resetOrder();
-      // Switch to order-tracking tab
+      // Switch to order-tracking tab immediately
       setInternalMode('track');
+      // Clear orders error if any
+      setOrdersError(null);
+      // Auto-dismiss success notification after 5 seconds
+      setTimeout(() => setOrderSuccess(null), 5000);
+      // Refresh orders from server in background
+      refreshOrders(false);
     } catch (err: any) {
       setError(err.response?.data?.detail || 'Failed to place order');
     } finally {
@@ -327,9 +335,24 @@ export default function StudentOrder({ mode = 'place' }: StudentOrderProps) {
   }, [userLocation]);
 
   return (
-    <div className="student-order-view">
-      <h2>Order via Unitrans</h2>
-      <p className="subtitle">Low-cost, eco-friendly delivery to your nearest bus stop</p>
+    <div className="user-order-view">
+      {/* ── HERO BANNER ── */}
+      <div className="order-hero">
+        <div className="order-hero-text">
+          <h1 className="order-hero-title">
+            Hey{user?.name ? `, ${user.name.split(' ')[0]}` : ''}! 👋
+          </h1>
+          <p className="order-hero-sub">
+            What are you craving today? Your bus stop delivery is waiting.
+          </p>
+        </div>
+        <div className="order-promise-chips">
+          <span className="promise-chip">🚌 Avg 20 min</span>
+          <span className="promise-chip">🌱 Zero extra emissions</span>
+          <span className="promise-chip">💰 From $1.99 delivery</span>
+          <span className="promise-chip green">✅ {stops.length} stops active</span>
+        </div>
+      </div>
 
       {orderSuccess && (
         <div className="order-success-banner">
@@ -372,13 +395,14 @@ export default function StudentOrder({ mode = 'place' }: StudentOrderProps) {
                 )}
                 {activeOrder.qr_code && (
                   <div style={{ 
-                    backgroundColor: '#f5f5f5', 
-                    padding: '8px', 
-                    borderRadius: '4px',
-                    marginTop: '8px'
+                    backgroundColor: 'rgba(218, 170, 0, 0.1)', 
+                    border: '1px solid rgba(218, 170, 0, 0.3)',
+                    padding: '12px', 
+                    borderRadius: '8px',
+                    marginTop: '12px'
                   }}>
-                    <p><strong>🔍 Package Code:</strong></p>
-                    <p style={{ fontSize: '14px', fontFamily: 'monospace', wordBreak: 'break-all' }}>
+                    <p style={{ color: 'var(--text-main)', marginBottom: '4px' }}><strong>🔍 Package Code:</strong></p>
+                    <p style={{ fontSize: '16px', fontFamily: 'monospace', fontWeight: 600, wordBreak: 'break-all', color: 'var(--accent)', letterSpacing: '1px' }}>
                       {activeOrder.qr_code}
                     </p>
                   </div>
@@ -544,9 +568,10 @@ export default function StudentOrder({ mode = 'place' }: StudentOrderProps) {
 
           <div className="order-confirmation">
             <h2>🧾 Order History</h2>
+            {ordersError && <div className="error-message">{ordersError}</div>}
             {ordersLoading && <p>Loading order history...</p>}
-            {!ordersLoading && sortedOrders.length === 0 && <p>No orders yet.</p>}
-            {sortedOrders.map(order => (
+            {!ordersLoading && !ordersError && sortedOrders.length === 0 && <p>No orders yet.</p>}
+            {!ordersError && sortedOrders.map(order => (
               <div key={order.id} className="order-details">
                 <p><strong>Order #{order.id}</strong> {order.id === activeOrder?.id ? '(Active)' : ''}</p>
                 <p>{order.restaurant_name} → {order.stop.name} ({order.stop.code})</p>
@@ -633,9 +658,6 @@ export default function StudentOrder({ mode = 'place' }: StudentOrderProps) {
                     <span className="restaurant-card-name">{r.name}</span>
                     {r.cuisine_type && <span className="restaurant-card-cuisine">{r.cuisine_type}</span>}
                     {r.description && <span className="restaurant-card-desc">{r.description}</span>}
-                    <span className="restaurant-card-fee">
-                      Delivery: ${(r.delivery_fee_cents / 100).toFixed(2)}
-                    </span>
                     {activeFilter !== 'all' && (
                       <span className="restaurant-card-match">
                         {r.menu_items.filter(mi => mi.tags?.split(',').map(t => t.trim()).includes(activeFilter)).length} match

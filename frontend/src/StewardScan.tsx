@@ -105,6 +105,10 @@ export default function StewardScan() {
           <p>{statusMessage}</p>
           <div className="order-summary">
             <div className="summary-row">
+              <span>Student Name:</span>
+              <strong>{result.student_name}</strong>
+            </div>
+            <div className="summary-row">
               <span>Restaurant:</span>
               <strong>{result.restaurant_name}</strong>
             </div>

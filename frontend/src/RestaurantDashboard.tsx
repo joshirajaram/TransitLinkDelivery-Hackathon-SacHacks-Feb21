@@ -167,7 +167,7 @@ export default function RestaurantDashboard() {
                   <div style={{ flex: 1 }}>
                     <h3>Order #{order.id}</h3>
                     {order.estimated_delivery_time && (
-                      <p style={{ fontSize: '0.9em', color: '#666', margin: '4px 0 0 0' }}>
+                      <p style={{ fontSize: '0.9em', color: '#94a3b8', margin: '4px 0 0 0' }}>
                         ⏱️ ETA: {formatETA(order.estimated_delivery_time)}
                       </p>
                     )}
@@ -215,7 +215,7 @@ export default function RestaurantDashboard() {
                           alt="QR Code" 
                           style={{ width: '100px', height: '100px' }}
                         />
-                        <code style={{ fontSize: '12px', wordBreak: 'break-all' }}>
+                        <code style={{ fontSize: '12px', wordBreak: 'break-all', color: '#1e293b' }}>
                           {order.qr_code}
                         </code>
                       </div>
@@ -236,23 +236,6 @@ export default function RestaurantDashboard() {
                   <div className="item-row total">
                     <strong>Total:</strong>
                     <strong>${(order.total_price_cents / 100).toFixed(2)}</strong>
-                  </div>
-                </div>
-
-                {/* Status Timeline */}
-                <div style={{ 
-                  fontSize: '12px', 
-                  marginTop: '12px', 
-                  padding: '8px', 
-                  backgroundColor: '#f9f9f9',
-                  borderRadius: '4px'
-                }}>
-                  <div style={{ marginBottom: '6px' }}>📅 Status Timeline:</div>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '6px', fontSize: '11px' }}>
-                    <div>✓ Accepted: {order.accepted_at ? new Date(order.accepted_at).toLocaleTimeString() : '-'}</div>
-                    <div>✓ Ready: {order.ready_at ? new Date(order.ready_at).toLocaleTimeString() : '-'}</div>
-                    <div>✓ On Bus: {order.on_bus_at ? new Date(order.on_bus_at).toLocaleTimeString() : '-'}</div>
-                    <div>✓ Done: {order.completed_at ? new Date(order.completed_at).toLocaleTimeString() : '-'}</div>
                   </div>
                 </div>
 

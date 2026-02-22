@@ -115,6 +115,7 @@ export interface OrderItem {
 export interface Order {
   id: number;
   student_id: number;
+  student_name: string;
   restaurant_id: number;
   restaurant_name: string;
   stop: Stop;

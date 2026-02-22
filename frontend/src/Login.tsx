@@ -6,57 +6,47 @@ interface LoginProps {
   onSwitchToSignup?: () => void;
 }
 
-// Google Sign-In configuration
-const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID || ''; // Add to .env
+const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID || '';
 
 declare global {
-  interface Window {
-    google: any;
-  }
+  interface Window { google: any; }
 }
 
+const FEATURES = [
+  { icon: '🚌', title: 'Bus-to-Door Delivery', desc: 'Food delivered right to your Unitrans bus stop' },
+  { icon: '🌱', title: 'Eco-Friendly', desc: 'Zero extra emissions — buses already run the route' },
+  { icon: '💰', title: 'Student Pricing', desc: 'Just $1–3 delivery vs $8+ on other platforms' },
+  { icon: '📍', title: 'Live Tracking', desc: 'Watch your bus arrive in real time on the map' },
+];
+
 const Login = ({ onLogin, onSwitchToSignup }: LoginProps) => {
-  const [email, setEmail] = useState('');
+  const [email, setEmail]       = useState('');
   const [password, setPassword] = useState('');
-  const [error, setError] = useState('');
+  const [error, setError]       = useState('');
   const [errorKey, setErrorKey] = useState(0);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading]   = useState(false);
+  const [activeRole, setActiveRole] = useState<string | null>(null);
 
   useEffect(() => {
-    // Load Google Sign-In script
     const script = document.createElement('script');
     script.src = 'https://accounts.google.com/gsi/client';
     script.async = true;
     script.defer = true;
     document.body.appendChild(script);
-
     script.onload = () => {
       if (window.google && GOOGLE_CLIENT_ID) {
-        window.google.accounts.id.initialize({
-          client_id: GOOGLE_CLIENT_ID,
-          callback: handleGoogleSignIn,
-        });
+        window.google.accounts.id.initialize({ client_id: GOOGLE_CLIENT_ID, callback: handleGoogleSignIn });
         window.google.accounts.id.renderButton(
           document.getElementById('googleSignInButton'),
-          {
-            theme: 'outline',
-            size: 'large',
-            width: 400,
-            text: 'continue_with',
-          }
+          { theme: 'outline', size: 'large', width: 360, text: 'continue_with' }
         );
       }
     };
-
-    return () => {
-      document.body.removeChild(script);
-    };
+    return () => { document.body.removeChild(script); };
   }, []);
 
   const handleGoogleSignIn = async (response: any) => {
-    setError('');
-    setLoading(true);
-
+    setError(''); setLoading(true);
     try {
       const result = await googleAuth(response.credential);
       localStorage.setItem('token', result.access_token);
@@ -65,400 +55,141 @@ const Login = ({ onLogin, onSwitchToSignup }: LoginProps) => {
     } catch (err: any) {
       setError(err.response?.data?.detail || 'Google sign-in failed');
       setErrorKey(k => k + 1);
-    } finally {
-      setLoading(false);
-    }
+    } finally { setLoading(false); }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setError('');
-    setLoading(true);
-
+    e.preventDefault(); setError(''); setLoading(true);
     try {
       const response = await login({ email, password });
       localStorage.setItem('token', response.access_token);
       localStorage.setItem('user', JSON.stringify(response.user));
       onLogin(response.user);
     } catch (err: any) {
-      setError(err.response?.data?.detail || 'Login failed');
+      setError(err.response?.data?.detail || 'Invalid email or password');
       setErrorKey(k => k + 1);
-    } finally {
-      setLoading(false);
-    }
+    } finally { setLoading(false); }
+  };
+
+  const fillDemo = (role: string) => {
+    setActiveRole(role);
+    if (role === 'student')    { setEmail('student@ucdavis.edu');         setPassword('demo'); }
+    if (role === 'restaurant') { setEmail('owner@tacomadavis.com');        setPassword('demo'); }
+    if (role === 'steward')    { setEmail('steward@ucdavis.edu');          setPassword('demo'); }
+    if (role === 'admin')      { setEmail('admin@transitlink.app');        setPassword('demo'); }
+    setError('');
   };
 
   return (
-    <div className="login-container">
-      <div className="login-role-buttons">
-        <button
-          type="button"
-          className="role-quick-button"
-          onClick={() => {
-            setEmail('owner@tacomadavis.com');
-            setPassword('demo');
-            setError('');
-          }}
-        >
-          I’m a restaurant owner
-        </button>
-        <button
-          type="button"
-          className="role-quick-button"
-          onClick={() => {
-            setEmail('steward@ucdavis.edu');
-            setPassword('demo');
-            setError('');
-          }}
-        >
-          I’m a Unitrans order manager
-        </button>
-      </div>
-      <div className="login-box">
-        <div className="login-header">
-          <h1>🚌 TransitLink Delivery</h1>
-          <p>UC Davis Campus Food Delivery via Unitrans</p>
+    <div className="auth-page">
+      {/* ── LEFT BRAND PANEL ── */}
+      <div className="auth-brand-panel">
+        <div className="auth-brand-inner">
+          <div className="auth-logo-row">
+            <span className="auth-logo-transit">TRANSIT</span>
+            <span className="auth-logo-link">LINK</span>
+          </div>
+          <p className="auth-tagline">Smart food delivery via Unitrans bus network</p>
+
+          <div className="auth-features">
+            {FEATURES.map(f => (
+              <div key={f.title} className="auth-feature-item">
+                <span className="auth-feature-icon">{f.icon}</span>
+                <div>
+                  <strong>{f.title}</strong>
+                  <p>{f.desc}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <div className="auth-partner-row">
+            <span className="auth-partner-badge">UNITRANS</span>
+            <span className="auth-partner-x">×</span>
+            <span className="auth-partner-badge accent">DDBA</span>
+          </div>
         </div>
+      </div>
 
-        {/* Google Sign-In Button */}
-        {GOOGLE_CLIENT_ID ? (
-          <div className="google-signin-section">
-            <div id="googleSignInButton" className="google-button-container"></div>
-            
-            <div className="divider">
-              <span>OR</span>
-            </div>
-          </div>
-        ) : (
-          <div className="info-message">
-            <p>⚙️ To enable Google Sign-In, add your Google Client ID to .env:</p>
-            <code>VITE_GOOGLE_CLIENT_ID=your-client-id</code>
-          </div>
-        )}
-
-        <form onSubmit={handleSubmit} className="login-form">
-          <div className="form-group">
-            <label htmlFor="email">Email</label>
-            <input
-              id="email"
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="your.email@ucdavis.edu"
-              required
-              disabled={loading}
-            />
+      {/* ── RIGHT FORM PANEL ── */}
+      <div className="auth-form-panel">
+        <div className="auth-form-card">
+          <div className="auth-form-header">
+            <h1>Welcome back</h1>
+            <p>Sign in to order food via Unitrans</p>
           </div>
 
-          <div className="form-group">
-            <label htmlFor="password">Password</label>
-            <input
-              id="password"
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder="Enter password"
-              disabled={loading}
-            />
-          </div>
-
-          {error && (
-            <div key={errorKey} className="error-message login-error-message">
-              <span>{error}</span>
+          {/* Quick role selector */}
+          <div className="auth-role-tabs">
+            <span className="auth-role-label">Try demo:</span>
+            {[
+              { id: 'student',    icon: '🎓', label: 'Student'    },
+              { id: 'restaurant', icon: '🍽️', label: 'Restaurant' },
+              { id: 'steward',    icon: '🚌', label: 'Steward'    },
+            ].map(r => (
               <button
-                onClick={() => setError('')}
-                className="error-dismiss"
-                aria-label="Dismiss"
-              >×</button>
-            </div>
+                key={r.id}
+                type="button"
+                className={`auth-role-chip ${activeRole === r.id ? 'active' : ''}`}
+                onClick={() => fillDemo(r.id)}
+              >
+                {r.icon} {r.label}
+              </button>
+            ))}
+          </div>
+
+          {GOOGLE_CLIENT_ID && (
+            <>
+              <div id="googleSignInButton" className="google-btn-wrap" />
+              <div className="auth-divider"><span>or continue with email</span></div>
+            </>
           )}
 
-          <button type="submit" className="btn-primary" disabled={loading}>
-            {loading ? 'Logging in...' : 'Log In with Email'}
-          </button>
-        </form>
+          <form onSubmit={handleSubmit} className="auth-form">
+            <div className="auth-field">
+              <label htmlFor="email">Email address</label>
+              <input
+                id="email" type="email"
+                placeholder="you@ucdavis.edu"
+                value={email} onChange={e => setEmail(e.target.value)}
+                disabled={loading} required
+              />
+            </div>
+            <div className="auth-field">
+              <label htmlFor="password">Password</label>
+              <input
+                id="password" type="password"
+                placeholder="Enter your password"
+                value={password} onChange={e => setPassword(e.target.value)}
+                disabled={loading}
+              />
+            </div>
 
-        <div className="login-footer">
-          <p>🔐 Secure Authentication</p>
-          <small>Sign in with Google or your UC Davis account</small>
-        </div>
+            {error && (
+              <div key={errorKey} className="auth-error">
+                <span>⚠️ {error}</span>
+                <button type="button" onClick={() => setError('')} aria-label="Dismiss">×</button>
+              </div>
+            )}
 
-        <div className="signup-prompt">
-          <p>Don't have an account? <a href="#" onClick={(e) => { e.preventDefault(); onSwitchToSignup?.() }} style={{ cursor: 'pointer' }}>Sign up here</a></p>
+            <button type="submit" className="auth-submit-btn" disabled={loading}>
+              {loading ? <span className="auth-spinner" /> : null}
+              {loading ? 'Signing in…' : 'Sign In →'}
+            </button>
+          </form>
+
+          <p className="auth-switch-prompt">
+            New to TransitLink?{' '}
+            <button type="button" className="auth-link-btn" onClick={onSwitchToSignup}>
+              Create an account
+            </button>
+          </p>
+
+          <div className="auth-secure-note">
+            <span>🔒</span> Secure authentication · UC Davis SSO supported
+          </div>
         </div>
       </div>
-
-      <style>{`
-        .login-container {
-          min-height: 100vh;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          background: linear-gradient(135deg, #002855 0%, #1D4F91 100%);
-          padding: 20px;
-          position: relative;
-        }
-
-        .login-role-buttons {
-          position: absolute;
-          top: 24px;
-          right: 24px;
-          display: flex;
-          gap: 12px;
-          flex-wrap: wrap;
-        }
-
-        .role-quick-button {
-          background: rgba(255, 255, 255, 0.9);
-          border: 1px solid rgba(226, 232, 240, 0.9);
-          color: #1e293b;
-          padding: 10px 14px;
-          border-radius: 999px;
-          font-size: 13px;
-          font-weight: 600;
-          cursor: pointer;
-          transition: transform 0.2s ease, box-shadow 0.2s ease;
-        }
-
-        .role-quick-button:hover {
-          transform: translateY(-1px);
-          box-shadow: 0 6px 16px rgba(15, 23, 42, 0.18);
-        }
-
-        .login-box {
-          background: white;
-          border-radius: 16px;
-          box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
-          padding: 40px;
-          max-width: 480px;
-          width: 100%;
-          border-top: 5px solid #DAAA00;
-        }
-
-        .login-header {
-          text-align: center;
-          margin-bottom: 32px;
-          padding-bottom: 20px;
-          border-bottom: 2px solid #DAAA00;
-        }
-
-        .login-header h1 {
-          font-size: 26px;
-          margin: 0 0 6px 0;
-          color: #002855;
-        }
-
-        .login-header p {
-          color: #718096;
-          margin: 0;
-          font-size: 13px;
-        }
-
-        .login-form {
-          display: flex;
-          flex-direction: column;
-          gap: 20px;
-        }
-
-        .form-group {
-          display: flex;
-          flex-direction: column;
-          gap: 8px;
-        }
-
-        .form-group label {
-          font-weight: 600;
-          color: #2d3748;
-          font-size: 14px;
-        }
-
-        .form-group input {
-          padding: 12px 16px;
-          border: 2px solid #e2e8f0;
-          border-radius: 8px;
-          font-size: 16px;
-          transition: border-color 0.2s;
-        }
-
-        .form-group input:focus {
-          outline: none;
-          border-color: #1D4F91;
-        }
-
-        .form-group input:disabled {
-          background: #f7fafc;
-          cursor: not-allowed;
-        }
-
-        @keyframes loginShake {
-          0%, 100% { transform: translateX(0); }
-          15%       { transform: translateX(-7px); }
-          30%       { transform: translateX(7px); }
-          45%       { transform: translateX(-5px); }
-          60%       { transform: translateX(5px); }
-          75%       { transform: translateX(-3px); }
-          90%       { transform: translateX(3px); }
-        }
-
-        .login-error-message {
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          gap: 8px;
-          background: #fff1f0;
-          border: 1.5px solid #fca5a5;
-          color: #b91c1c;
-          padding: 12px 14px;
-          border-radius: 8px;
-          font-size: 14px;
-          font-weight: 500;
-          animation: loginShake 0.45s ease;
-        }
-
-        .error-dismiss {
-          background: none;
-          border: none;
-          color: #b91c1c;
-          font-size: 18px;
-          line-height: 1;
-          cursor: pointer;
-          padding: 0 2px;
-          opacity: 0.7;
-          flex-shrink: 0;
-        }
-
-        .error-dismiss:hover { opacity: 1; }
-
-        .btn-primary {
-          background: #002855;
-          color: white;
-          border: none;
-          padding: 14px;
-          border-radius: 8px;
-          font-size: 16px;
-          font-weight: 600;
-          cursor: pointer;
-          transition: background 0.2s;
-        }
-
-        .btn-primary:hover:not(:disabled) {
-          background: #1D4F91;
-        }
-
-        .btn-primary:disabled {
-          opacity: 0.6;
-          cursor: not-allowed;
-        }
-
-        .divider {
-          margin: 24px 0;
-          text-align: center;
-          position: relative;
-        }
-
-        .divider::before {
-          content: '';
-          position: absolute;
-          left: 0;
-          right: 0;
-          top: 50%;
-          height: 1px;
-          background: #e2e8f0;
-        }
-
-        .divider span {
-          background: white;
-          padding: 0 12px;
-          position: relative;
-          color: #a0aec0;
-          font-size: 14px;
-        }
-
-        .google-signin-section {
-          margin-bottom: 16px;
-        }
-
-        .google-button-container {
-          display: flex;
-          justify-content: center;
-          margin: 16px 0;
-        }
-
-        .info-message {
-          background: #e6fffa;
-          border: 1px solid #81e6d9;
-          border-radius: 8px;
-          padding: 16px;
-          margin-bottom: 16px;
-        }
-
-        .info-message p {
-          margin: 0 0 8px 0;
-          color: #234e52;
-          font-size: 14px;
-          font-weight: 600;
-        }
-
-        .info-message code {
-          display: block;
-          background: #fff;
-          padding: 8px;
-          border-radius: 4px;
-          font-size: 12px;
-          color: #2d3748;
-          word-break: break-all;
-        }
-
-        .login-footer {
-          margin-top: 24px;
-          text-align: center;
-          padding-top: 24px;
-          border-top: 1px solid #e2e8f0;
-        }
-
-        .login-footer p {
-          margin: 0 0 4px 0;
-          color: #4a5568;
-          font-size: 13px;
-          font-weight: 600;
-        }
-
-        .login-footer small {
-          color: #a0aec0;
-          font-size: 12px;
-        }
-
-        .signup-prompt {
-          margin-top: 16px;
-          text-align: center;
-        }
-
-        .signup-prompt p {
-          margin: 0;
-          color: #4a5568;
-          font-size: 14px;
-        }
-
-        .signup-prompt a {
-          color: #1D4F91;
-          text-decoration: none;
-          font-weight: 600;
-          transition: color 0.2s;
-        }
-
-        .signup-prompt a:hover {
-          color: #002855;
-          text-decoration: underline;
-        }
-
-        @media (max-width: 700px) {
-          .login-role-buttons {
-            position: static;
-            margin-bottom: 16px;
-            justify-content: center;
-          }
-        }
-      `}</style>
     </div>
   );
 };
