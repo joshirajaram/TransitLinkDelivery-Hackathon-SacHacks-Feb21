@@ -2,7 +2,53 @@
 
 **SacHacks 2026 Hackathon Project**
 
-A sustainable, low-cost delivery platform that uses the ASUCD Unitrans network as middle‑mile infrastructure to help downtown Davis restaurants escape high DoorDash fees.
+TransitLink converts existing campus buses into predictable, low-cost delivery vehicles by integrating directly with live transit routes.
+Instead of treating delivery as a driver-dispatch problem, we treat it as a **route intelligence problem**.
+
+---
+
+## ❓ Why Not DoorDash?
+
+DoorDash and traditional delivery platforms:
+- Rely on independent drivers
+- Use dynamic routing
+- Introduce surge pricing and variability
+- Add additional vehicles and emissions
+
+TransitLink:
+- Uses buses that are **already running**
+- Reduces marginal delivery cost
+- Anchors ETA to **real bus routes**
+- Eliminates driver dependency
+- Minimizes emissions
+
+We are solving a **campus-specific logistics gap**, not competing with generic delivery platforms.
+
+---
+
+## 🚎 Why Unitrans?
+
+Unitrans is ideal because it already provides:
+
+- Fixed, high-frequency routes
+- Downtown and student-heavy coverage
+- Live GPS feeds
+- Public route XML data
+- Institutional staff (stewards)
+
+This makes deployment low-friction and operationally realistic.
+
+---
+
+## 🧠 Core Technical Approach
+
+### Route-Aware Matching
+
+- Ingest live GPS + route XML
+- Cache ordered stop lists
+- Map bus GPS to nearest stop using spatial indexing
+- Compute ETA as:
+
 
 ## 🎯 The Problem
 
@@ -74,29 +120,47 @@ VITE_MAPBOX_TOKEN=your_mapbox_token_here
 
 Frontend will be available at `http://localhost:5173`
 
-## 📱 User Flows
+## 👤 Feature Demo Views
 
-### Student Journey
-1. Browse downtown restaurants and menus
-2. Add items to order
-3. Share location or pin it on the map
-4. System assigns the closest downtown‑serving stop and route
-5. Choose delivery window
-6. Receive QR code for pickup
-7. Track live status; show QR at handoff
+### 1️⃣ Customer View
 
-### Restaurant Journey
-1. Receive order notification
-2. Accept or decline the order
-3. Update status: PREPARING → READY_FOR_PICKUP
-4. Hand order to steward when Unitrans arrives
+- Displays delivery window calculated using **route-aware stop logic**
+- Shows nearest pickup stop along a route passing through downtown
+- When order is on the bus:
+  - Live bus location is shown
+  - ETA updates dynamically
+  - ETA is stable (anchored to stop indices, not raw GPS)
 
-### Steward Journey
-1. Log in to steward interface
-2. Pick up orders from restaurants
-3. Scan QR to mark ON_BUS (route verified)
-4. Navigate to designated stops
-5. Scan again at drop‑off to mark COMPLETED
+---
+
+### 2️⃣ Restaurant View
+
+- View incoming orders
+- View order history
+- Accept new orders
+- When food is prepared → click `READY_FOR_PICKUP`
+  - Status updates instantly for:
+    - Customer
+    - Unitrans food manager
+
+Orders are prepaid → zero financial risk to restaurants.
+
+---
+
+### 3️⃣ Unitrans Food Manager View
+
+- See all `READY_FOR_PICKUP` orders assigned to their route
+- Scan QR at pickup → status = `ON_BUS`
+- Scan QR at delivery → status = `COMPLETED`
+- Pickup & delivery timestamps logged
+
+While order is `ON_BUS`:
+- Customer sees live bus location
+- Delivery ETA updates in real time
+
+Two scans. Two timestamps. Full audit trail.
+
+---
 
 ## 🎨 Features
 
