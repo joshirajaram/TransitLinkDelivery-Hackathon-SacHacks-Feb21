@@ -39,6 +39,13 @@ export interface LoginRequest {
   password: string;
 }
 
+export interface RegisterRequest {
+  email: string;
+  name: string;
+  password: string;
+  role: 'STUDENT' | 'RESTAURANT_OWNER' | 'STEWARD' | 'ADMIN';
+}
+
 export interface LoginResponse {
   access_token: string;
   token_type: string;
@@ -51,12 +58,14 @@ export interface MenuItem {
   name: string;
   description?: string;
   price_cents: number;
+  tags?: string;  // comma-separated: vegan,vegetarian,non-veg,beverages,breakfast,spicy,...
 }
 
 export interface Restaurant {
   id: number;
   name: string;
   description?: string;
+  cuisine_type?: string;
   latitude: number;
   longitude: number;
   delivery_fee_cents: number;
@@ -109,6 +118,11 @@ export interface Order {
   bus_id?: string | null;
   qr_code: string;
   created_at: string;
+  estimated_delivery_time?: string;
+  accepted_at?: string;
+  ready_at?: string;
+  on_bus_at?: string;
+  completed_at?: string;
   items: OrderItem[];
 }
 
@@ -124,6 +138,9 @@ export interface CreateOrderRequest {
 export const login = (credentials: LoginRequest) => 
   api.post<LoginResponse>('/auth/login', credentials).then(res => res.data);
 
+export const register = (data: RegisterRequest) =>
+  api.post<LoginResponse>('/auth/register', data).then(res => res.data);
+
 export const googleAuth = (token: string) =>
   api.post<LoginResponse>('/auth/google', { token }).then(res => res.data);
 
@@ -131,6 +148,10 @@ export const getMe = () =>
   api.get<User>('/auth/me').then(res => res.data);
 
 export const apiClient = {
+  login: (credentials: LoginRequest) => login(credentials),
+  register: (data: RegisterRequest) => register(data),
+  googleAuth: (token: string) => googleAuth(token),
+  getMe: () => getMe(),
   getRestaurants: () => api.get<Restaurant[]>('/restaurants'),
   getMyRestaurant: () => api.get<Restaurant>('/restaurants/my-restaurant'),
   getStops: () => api.get<Stop[]>('/stops'),
@@ -140,6 +161,7 @@ export const apiClient = {
   getMyOrders: () => api.get<Order[]>('/orders/my'),
   getRestaurantOrders: (restaurantId: number) => api.get<Order[]>(`/restaurants/${restaurantId}/orders`),
   updateOrderStatus: (orderId: number, status: string) => api.patch<Order>(`/orders/${orderId}/status`, { status }),
+  getOrderQRCode: (orderId: number) => api.get<any>(`/orders/${orderId}/qr-code`).then(res => res.data),
   stewardScan: (qrCode: string) => api.post<Order>('/steward/scan', { qr_code: qrCode }),
   getDashboardData: () => api.get('/admin/dashboard'),
   getBusLocations: () => api.get<BusLocation[]>('/bus-locations'),

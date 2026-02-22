@@ -27,6 +27,7 @@ class RestaurantORM(Base):
     name = Column(String, nullable=False)
     address = Column(String, nullable=True)
     description = Column(String, nullable=True)
+    cuisine_type = Column(String, nullable=True)  # e.g. "Thai", "Pizza", "Mexican"
     latitude = Column(Float, nullable=False)
     longitude = Column(Float, nullable=False)
     owner_id = Column(Integer, ForeignKey("users.id"), nullable=True)
@@ -47,6 +48,7 @@ class MenuItemORM(Base):
     description = Column(String, nullable=True)
     price_cents = Column(Integer, nullable=False)
     is_active = Column(Boolean, default=True)
+    tags = Column(String, nullable=True)  # comma-separated: vegan,spicy,breakfast,gluten-free,…
 
     restaurant = relationship("RestaurantORM", back_populates="menu_items")
 
@@ -114,3 +116,13 @@ def init_db() -> None:
         columns = {row[1] for row in result.fetchall()}
         if "bus_id" not in columns:
             connection.execute(text("ALTER TABLE orders ADD COLUMN bus_id VARCHAR"))
+
+        result2 = connection.execute(text("PRAGMA table_info(restaurants)"))
+        rcols = {row[1] for row in result2.fetchall()}
+        if "cuisine_type" not in rcols:
+            connection.execute(text("ALTER TABLE restaurants ADD COLUMN cuisine_type VARCHAR"))
+
+        result3 = connection.execute(text("PRAGMA table_info(menu_items)"))
+        mcols = {row[1] for row in result3.fetchall()}
+        if "tags" not in mcols:
+            connection.execute(text("ALTER TABLE menu_items ADD COLUMN tags VARCHAR"))

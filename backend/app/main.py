@@ -19,6 +19,7 @@ from sqlalchemy.orm import Session
 from .auth import (
     Token,
     UserLogin,
+    UserRegister,
     CurrentUser,
     create_access_token,
     get_current_user,
@@ -142,51 +143,231 @@ async def poll_unitrans_feed_forever() -> None:
 
 def seed_demo_data(db: Session) -> None:
     """Seed initial data for demo purposes."""
-    # Check if already seeded
-    if db.query(RestaurantORM).first():
+    # Only seed once based on whether we already have the full restaurant set
+    if db.query(RestaurantORM).count() >= 10:
         return
 
-    # Create users
-    student = UserORM(email="student@ucdavis.edu", name="Test Student", role=UserRole.STUDENT.value)
-    owner = UserORM(email="owner@tacomadavis.com", name="Taco Owner", role=UserRole.RESTAURANT_OWNER.value)
-    steward = UserORM(email="steward@ucdavis.edu", name="ASUCD Steward", role=UserRole.STEWARD.value)
-    admin = UserORM(email="admin@ddba.org", name="DDBA Admin", role=UserRole.ADMIN.value)
-    db.add_all([student, owner, steward, admin])
-    db.flush()
+    # ── Users ──────────────────────────────────────────────────────────
+    def get_or_create_user(email, name, role):
+        u = db.query(UserORM).filter(UserORM.email == email).first()
+        if not u:
+            u = UserORM(email=email, name=name, role=role)
+            db.add(u)
+            db.flush()
+        return u
 
-    # Create restaurant with menu
-    restaurant = RestaurantORM(
-        name="Downtown Tacos",
-        description="Local Davis tacos",
-        latitude=38.5449,
-        longitude=-121.7405,
-        owner_id=owner.id,
-        avg_prep_minutes=15,
-        delivery_fee_cents=150,
+    student  = get_or_create_user("student@ucdavis.edu",   "Test Student",   UserRole.STUDENT.value)
+    steward  = get_or_create_user("steward@ucdavis.edu",   "ASUCD Steward",  UserRole.STEWARD.value)
+    admin    = get_or_create_user("admin@ddba.org",         "DDBA Admin",     UserRole.ADMIN.value)
+    owner1   = get_or_create_user("owner@woodstocks.com",  "Woodstock Owner",UserRole.RESTAURANT_OWNER.value)
+    owner2   = get_or_create_user("owner@burgersbrew.com", "B&B Owner",      UserRole.RESTAURANT_OWNER.value)
+    owner3   = get_or_create_user("owner@sophias.com",     "Sophia Owner",   UserRole.RESTAURANT_OWNER.value)
+    owner4   = get_or_create_user("owner@crepeville.com",  "Crepe Owner",    UserRole.RESTAURANT_OWNER.value)
+    owner5   = get_or_create_user("owner@doscoyotes.com",  "DC Owner",       UserRole.RESTAURANT_OWNER.value)
+    owner6   = get_or_create_user("owner@alibaba.com",     "Ali Baba Owner", UserRole.RESTAURANT_OWNER.value)
+    owner7   = get_or_create_user("owner@villagebakery.com","VB Owner",      UserRole.RESTAURANT_OWNER.value)
+    owner8   = get_or_create_user("owner@ketmoree.com",    "KMR Owner",      UserRole.RESTAURANT_OWNER.value)
+    owner9   = get_or_create_user("owner@lemongrass.com",  "LG Owner",       UserRole.RESTAURANT_OWNER.value)
+    owner10  = get_or_create_user("owner@seasons.com",     "Seasons Owner",  UserRole.RESTAURANT_OWNER.value)
+
+    # ── Helper to add a restaurant if it doesn't already exist ─────────
+    def add_restaurant(name, description, cuisine_type, lat, lon, owner, fee, prep, items):
+        existing = db.query(RestaurantORM).filter(RestaurantORM.name == name).first()
+        if existing:
+            return existing
+        r = RestaurantORM(
+            name=name, description=description, cuisine_type=cuisine_type,
+            latitude=lat, longitude=lon,
+            owner_id=owner.id, avg_prep_minutes=prep, delivery_fee_cents=fee,
+        )
+        db.add(r)
+        db.flush()
+        for item in items:
+            db.add(MenuItemORM(
+                restaurant_id=r.id,
+                name=item["name"], description=item.get("desc"),
+                price_cents=item["price"], tags=item.get("tags", ""),
+            ))
+        return r
+
+    # ── 1. Woodstock's Pizza ───────────────────────────────────────────
+    add_restaurant(
+        "Woodstock's Pizza", "Davis' legendary late-night pizza since 1979", "Pizza",
+        38.5450, -121.7406, owner1, 199, 20,
+        [
+            {"name": "Veggie Garden Pizza (slice)", "desc": "Fresh seasonal veggies", "price": 499, "tags": "vegetarian,staff-pick"},
+            {"name": "Pepperoni Pizza (slice)",     "desc": "Classic pepperoni",        "price": 549, "tags": "non-veg"},
+            {"name": "Cheese Pizza (slice)",        "desc": "Extra mozzarella",          "price": 449, "tags": "vegetarian"},
+            {"name": "The Works (whole 12\")",      "desc": "Everything on it",          "price": 2299,"tags": "non-veg,staff-pick"},
+            {"name": "Garlic Cheese Bread",         "desc": "House-made garlic butter",  "price": 699, "tags": "vegetarian"},
+            {"name": "Caesar Salad",                "desc": "Crispy romaine & croutons", "price": 799, "tags": "vegetarian"},
+            {"name": "Craft Root Beer",             "desc": "Old-fashioned root beer",   "price": 349, "tags": "beverages,vegan"},
+        ]
     )
-    db.add(restaurant)
-    db.flush()
 
-    menu_items = [
-        MenuItemORM(restaurant_id=restaurant.id, name="Veggie Taco", description="Fresh vegetables", price_cents=500),
-        MenuItemORM(restaurant_id=restaurant.id, name="Chicken Taco", description="Grilled chicken", price_cents=650),
-        MenuItemORM(restaurant_id=restaurant.id, name="Fish Taco", description="Fresh fish", price_cents=750),
-        MenuItemORM(restaurant_id=restaurant.id, name="Burrito", description="Large burrito", price_cents=900),
+    # ── 2. Burgers & Brew ─────────────────────────────────────────────
+    add_restaurant(
+        "Burgers & Brew", "Award-winning burgers & local craft beers", "American",
+        38.5441, -121.7394, owner2, 199, 15,
+        [
+            {"name": "Classic Smash Burger",   "desc": "Double smash, American cheese",        "price": 1299, "tags": "non-veg,ucd-favorite"},
+            {"name": "BBQ Bacon Burger",        "desc": "Smoked bacon, cheddar, BBQ sauce",     "price": 1499, "tags": "non-veg"},
+            {"name": "Veggie Burger",           "desc": "House black-bean patty",               "price": 1299, "tags": "vegetarian"},
+            {"name": "Crispy Fries",            "desc": "Seasoned, skin-on",                    "price": 499,  "tags": "vegetarian,vegan"},
+            {"name": "Onion Rings",             "desc": "Beer-battered",                        "price": 599,  "tags": "vegetarian"},
+            {"name": "Craft IPA (pint)",        "desc": "Local Sacramento brewery",             "price": 699,  "tags": "beverages"},
+            {"name": "Lemonade",                "desc": "House-squeezed",                       "price": 349,  "tags": "beverages,vegan"},
+        ]
+    )
+
+    # ── 3. Sophia's Thai Kitchen ──────────────────────────────────────
+    add_restaurant(
+        "Sophia's Thai Kitchen", "Authentic Thai — a Davis institution since 1993", "Thai",
+        38.5443, -121.7401, owner3, 199, 18,
+        [
+            {"name": "Pad Thai",           "desc": "Rice noodles, tamarind, peanuts",             "price": 1499, "tags": "non-veg,ucd-favorite"},
+            {"name": "Pad Thai (Tofu)",    "desc": "Vegan-friendly version",                       "price": 1399, "tags": "vegan"},
+            {"name": "Green Curry",        "desc": "Coconut milk, Thai basil, spicy",              "price": 1599, "tags": "spicy,non-veg"},
+            {"name": "Tofu Green Curry",   "desc": "Coconut milk, Thai basil",                     "price": 1499, "tags": "spicy,vegetarian,vegan"},
+            {"name": "Tom Yum Soup",       "desc": "Lemongrass, galangal, lime",                   "price": 1199, "tags": "spicy,non-veg"},
+            {"name": "Spring Rolls (4pc)", "desc": "Fried, served with sweet chili",               "price": 799,  "tags": "vegetarian"},
+            {"name": "Thai Iced Tea",      "desc": "Strong brew with condensed milk",              "price": 399,  "tags": "beverages"},
+            {"name": "Jasmine Iced Tea",   "desc": "Light & floral",                               "price": 349,  "tags": "beverages,vegan"},
+        ]
+    )
+
+    # ── 4. Crepeville ─────────────────────────────────────────────────
+    add_restaurant(
+        "Crepeville", "Beloved Davis breakfast & brunch crepe café", "Breakfast",
+        38.5443, -121.7402, owner4, 149, 12,
+        [
+            {"name": "Eggs & Veggie Crepe",      "desc": "Free-range eggs, seasonal veggies",     "price": 1099, "tags": "breakfast,vegetarian"},
+            {"name": "Smoked Salmon Crepe",      "desc": "Cream cheese, capers, dill",            "price": 1299, "tags": "breakfast,non-veg"},
+            {"name": "Nutella Banana Crepe",     "desc": "Nutella, fresh banana, powdered sugar", "price": 999,  "tags": "breakfast,vegetarian"},
+            {"name": "Avocado Toast Crepe",      "desc": "Sourdough crepe, avocado, chili flakes","price": 1149, "tags": "breakfast,vegan"},
+            {"name": "Granola Power Bowl",       "desc": "House granola, yogurt, honey, berries", "price": 899,  "tags": "breakfast,vegetarian,staff-pick"},
+            {"name": "French Press Coffee",      "desc": "Single-origin beans",                   "price": 499,  "tags": "beverages"},
+            {"name": "Fresh-Squeezed OJ",        "desc": "Pure California oranges",               "price": 449,  "tags": "beverages,vegan"},
+            {"name": "Chai Latte",               "desc": "Spiced masala chai, oat milk",          "price": 529,  "tags": "beverages,vegan"},
+        ]
+    )
+
+    # ── 5. Dos Coyotes Border Café ────────────────────────────────────
+    add_restaurant(
+        "Dos Coyotes Border Café", "Fresh Baja-inspired Mexican since 1991", "Mexican",
+        38.5452, -121.7407, owner5, 199, 12,
+        [
+            {"name": "Baja Burrito",        "desc": "Grilled chicken, black beans, pico",          "price": 1299, "tags": "non-veg,ucd-favorite"},
+            {"name": "Vegan Buddha Bowl",   "desc": "Roasted veggies, quinoa, avocado dressing",   "price": 1199, "tags": "vegan,staff-pick"},
+            {"name": "Fish Taco",           "desc": "Beer-battered cod, cabbage slaw, chipotle",   "price": 499,  "tags": "non-veg"},
+            {"name": "Veggie Quesadilla",   "desc": "Roasted peppers, onion, jack cheese",         "price": 999,  "tags": "vegetarian"},
+            {"name": "Chips & Salsa",       "desc": "House-made pico de gallo",                    "price": 499,  "tags": "vegan"},
+            {"name": "Horchata",            "desc": "House-made rice milk drink",                  "price": 349,  "tags": "beverages,vegan"},
+            {"name": "House Nachos",        "desc": "Queso, jalapeño, sour cream",                 "price": 1099, "tags": "vegetarian,spicy"},
+        ]
+    )
+
+    # ── 6. Ali Baba Restaurant ────────────────────────────────────────
+    add_restaurant(
+        "Ali Baba Restaurant", "Family-run Mediterranean & Middle Eastern kitchen", "Mediterranean",
+        38.5441, -121.7398, owner6, 149, 15,
+        [
+            {"name": "Falafel Plate",        "desc": "Crispy falafel, tabbouleh, pita",            "price": 1299, "tags": "vegan,staff-pick"},
+            {"name": "Chicken Shawarma Wrap","desc": "Marinated chicken, garlic sauce, pickles",   "price": 1399, "tags": "non-veg"},
+            {"name": "Veggie Shawarma Wrap", "desc": "Roasted veg, tahini, fresh herbs",           "price": 1199, "tags": "vegan"},
+            {"name": "Hummus & Pita",        "desc": "House hummus, warm pita",                    "price": 799,  "tags": "vegan"},
+            {"name": "Med Salad",            "desc": "Cucumber, tomato, olives, feta",             "price": 999,  "tags": "vegetarian,gluten-free"},
+            {"name": "Lamb Kebab Plate",     "desc": "Grilled lamb, rice, grilled veg",            "price": 1599, "tags": "non-veg,spicy,gluten-free"},
+            {"name": "Mint Lemonade",        "desc": "Fresh mint, lemon, sugar",                   "price": 399,  "tags": "beverages,vegan"},
+        ]
+    )
+
+    # ── 7. Village Bakery ─────────────────────────────────────────────
+    add_restaurant(
+        "Village Bakery", "Artisan sourdough & pastries baked fresh daily", "Bakery",
+        38.5437, -121.7449, owner7, 99, 8,
+        [
+            {"name": "Almond Croissant",   "desc": "Buttery, double-baked with almond cream",     "price": 499,  "tags": "breakfast,vegetarian,staff-pick"},
+            {"name": "Blueberry Scone",    "desc": "Organic blueberries, honey glaze",            "price": 399,  "tags": "breakfast,vegetarian"},
+            {"name": "Sourdough Sandwich", "desc": "House sourdough, turkey, avocado, sprouts",   "price": 999,  "tags": "breakfast,non-veg"},
+            {"name": "Avocado Sourdough",  "desc": "Smashed avo, chili, lemon, seeds",            "price": 899,  "tags": "breakfast,vegan"},
+            {"name": "Granola Parfait",    "desc": "House granola, local honey, seasonal fruit",  "price": 799,  "tags": "breakfast,vegetarian"},
+            {"name": "Drip Coffee",        "desc": "Single-origin, Ritual Roasters",              "price": 349,  "tags": "beverages,vegan"},
+            {"name": "Oat Latte",          "desc": "Double shot, steamed oat milk",               "price": 549,  "tags": "beverages,vegan"},
+            {"name": "Matcha Latte",       "desc": "Ceremonial grade matcha, oat milk",           "price": 599,  "tags": "beverages,vegan"},
+        ]
+    )
+
+    # ── 8. KetMoRee Thai Bistro ───────────────────────────────────────
+    add_restaurant(
+        "KetMoRee Thai Bistro", "Modern Thai with bold flavors — a UCD crowd favorite", "Thai",
+        38.5448, -121.7409, owner8, 199, 18,
+        [
+            {"name": "Drunken Noodles",    "desc": "Wide rice noodles, basil, chili",             "price": 1599, "tags": "spicy,non-veg,ucd-favorite"},
+            {"name": "Vegan Drunken Noodles","desc": "Tofu, wide noodles, Thai basil",            "price": 1499, "tags": "spicy,vegan"},
+            {"name": "Massaman Curry",     "desc": "Slow-cooked beef, potato, peanut",            "price": 1699, "tags": "non-veg"},
+            {"name": "Mango Sticky Rice",  "desc": "Sweet glutinous rice, fresh mango",           "price": 799,  "tags": "vegan,staff-pick"},
+            {"name": "Thai Papaya Salad",  "desc": "Green papaya, lime, fish sauce, chili",       "price": 999,  "tags": "spicy,non-veg,gluten-free"},
+            {"name": "Crispy Tofu Salad",  "desc": "Fried tofu, cucumber, peanut dressing",       "price": 999,  "tags": "vegan,gluten-free"},
+            {"name": "Thai Iced Coffee",   "desc": "Strong brew, sweetened condensed milk",       "price": 449,  "tags": "beverages"},
+            {"name": "Lychee Soda",        "desc": "Sparkling lychee, fresh lime",                "price": 349,  "tags": "beverages,vegan"},
+        ]
+    )
+
+    # ── 9. Lemon Grass Restaurant ─────────────────────────────────────
+    add_restaurant(
+        "Lemon Grass Restaurant", "Vietnamese & Southeast Asian comfort food", "Vietnamese",
+        38.5443, -121.7404, owner9, 149, 15,
+        [
+            {"name": "Pho Noodle Soup",       "desc": "Slow-simmered beef bone broth, rice noodles","price": 1399,"tags": "non-veg,ucd-favorite,gluten-free"},
+            {"name": "Veggie Pho",            "desc": "Mushroom broth, tofu, rice noodles",       "price": 1299,"tags": "vegan,gluten-free"},
+            {"name": "Lemongrass Chicken",    "desc": "Wok-fried with lemongrass & chili",        "price": 1499,"tags": "non-veg,spicy,gluten-free"},
+            {"name": "Tofu Spring Rolls (4pc)","desc": "Fresh herbs, vermicelli, peanut sauce",   "price": 799, "tags": "vegan"},
+            {"name": "Bahn Mi Sandwich",      "desc": "Grilled pork, pickled daikon, cilantro",   "price": 999, "tags": "non-veg"},
+            {"name": "Mango Avocado Salad",   "desc": "Fresh mango, avocado, sesame dressing",    "price": 1099,"tags": "vegan,gluten-free"},
+            {"name": "Mango Iced Tea",        "desc": "House-brewed black tea, mango syrup",      "price": 399, "tags": "beverages"},
+            {"name": "Iced Coconut Coffee",   "desc": "Vietnamese drip, coconut milk",            "price": 449, "tags": "beverages"},
+        ]
+    )
+
+    # ── 10. Seasons Restaurant ────────────────────────────────────────
+    add_restaurant(
+        "Seasons Restaurant", "Farm-to-fork American — sourcing from Yolo County farms", "American",
+        38.5453, -121.7412, owner10, 249, 20,
+        [
+            {"name": "Yolo Farm Bowl",       "desc": "Seasonal roasted veg, grain, tahini dressing","price": 1499,"tags": "vegan,staff-pick,gluten-free"},
+            {"name": "Seasonal Green Salad", "desc": "Local greens, shaved veg, vinaigrette",      "price": 1199,"tags": "vegan,gluten-free"},
+            {"name": "Free-Range Roast Chicken","desc": "Half chicken, roasted root veg, jus",     "price": 1899,"tags": "non-veg,gluten-free"},
+            {"name": "Grass-Fed Burger",      "desc": "Local beef, aged cheddar, aioli, brioche",  "price": 1699,"tags": "non-veg"},
+            {"name": "Mushroom Risotto",      "desc": "Arborio, wild mushrooms, parmesan",         "price": 1599,"tags": "vegetarian"},
+            {"name": "Local Apple Juice",     "desc": "Cold-pressed Yolo County apples",           "price": 599, "tags": "beverages,vegan"},
+            {"name": "Seasonal Fruit Tart",   "desc": "Buttery pastry, seasonal local fruit",      "price": 799, "tags": "vegetarian"},
+        ]
+    )
+
+    # ── Unitrans stops (add if not exists) ────────────────────────────
+    stop_data = [
+        ("MU",    "Memorial Union",               "Main campus hub",           38.5422, -121.7506),
+        ("SILO",  "Silo Terminal",                "South campus",               38.5390, -121.7513),
+        ("ARC",   "Activities & Recreation Center","West campus",               38.5378, -121.7588),
+        ("COHO",  "CoHo / South Silo",            "South campus dining area",  38.5382, -121.7500),
+        ("SHIELDS","Shields Library",             "Central library stop",       38.5407, -121.7490),
     ]
-    db.add_all(menu_items)
+    for code, name, desc, lat, lon in stop_data:
+        if not db.query(UnitransStopORM).filter(UnitransStopORM.code == code).first():
+            db.add(UnitransStopORM(code=code, name=name, description=desc, latitude=lat, longitude=lon))
 
-    # Create Unitrans stops
-    stops = [
-        UnitransStopORM(code="MU", name="Memorial Union", description="Main campus hub", latitude=38.5422, longitude=-121.7506),
-        UnitransStopORM(code="SILO", name="Silo Terminal", description="South campus", latitude=38.5390, longitude=-121.7513),
-        UnitransStopORM(code="ARC", name="Activities & Recreation Center", description="West campus", latitude=38.5378, longitude=-121.7588),
-    ]
-    db.add_all(stops)
+    # ── Delivery windows ──────────────────────────────────────────────
+    # Remove Breakfast window if it was previously seeded
+    breakfast = db.query(DeliveryWindowORM).filter(DeliveryWindowORM.label == "Breakfast").first()
+    if breakfast:
+        db.delete(breakfast)
+        db.flush()
 
-    # Create delivery windows
-    lunch = DeliveryWindowORM(label="Lunch", start_time=dt_time(12, 0), end_time=dt_time(14, 0), is_active=True)
-    dinner = DeliveryWindowORM(label="Dinner", start_time=dt_time(18, 0), end_time=dt_time(20, 0), is_active=True)
-    db.add_all([lunch, dinner])
+    if not db.query(DeliveryWindowORM).filter(DeliveryWindowORM.label == "Lunch").first():
+        db.add(DeliveryWindowORM(label="Lunch",  start_time=dt_time(12, 0), end_time=dt_time(14, 0), is_active=True))
+    if not db.query(DeliveryWindowORM).filter(DeliveryWindowORM.label == "Dinner").first():
+        db.add(DeliveryWindowORM(label="Dinner", start_time=dt_time(18, 0), end_time=dt_time(20, 0), is_active=True))
 
     db.commit()
     logger.info("Demo data seeded successfully")
@@ -195,9 +376,14 @@ def seed_demo_data(db: Session) -> None:
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     init_db()
-    # Seed demo data
     db = SessionLocal()
     try:
+        # Always remove Breakfast window (may have been seeded in a prior version)
+        breakfast = db.query(DeliveryWindowORM).filter(DeliveryWindowORM.label == "Breakfast").first()
+        if breakfast:
+            db.delete(breakfast)
+            db.commit()
+            logger.info("Removed legacy Breakfast delivery window")
         seed_demo_data(db)
     finally:
         db.close()
@@ -226,6 +412,7 @@ class RestaurantOut(BaseModel):
     id: int
     name: str
     description: str | None = None
+    cuisine_type: str | None = None
     latitude: float
     longitude: float
     delivery_fee_cents: int
@@ -240,6 +427,7 @@ class MenuItemOut(BaseModel):
     name: str
     description: str | None = None
     price_cents: int
+    tags: str | None = None
 
     class Config:
         from_attributes = True
@@ -461,6 +649,51 @@ def login(user_credentials: UserLogin, db: Session = Depends(get_db)):
     }
 
 
+@app.post("/auth/register", response_model=Token)
+def register(registration: UserRegister, db: Session = Depends(get_db)):
+    """Register a new user"""
+    # Check if email already exists
+    existing_user = db.query(UserORM).filter(UserORM.email == registration.email).first()
+    if existing_user:
+        raise HTTPException(status_code=400, detail="Email already registered")
+    
+    # Validate role
+    valid_roles = ["STUDENT", "RESTAURANT_OWNER", "STEWARD", "ADMIN"]
+    if registration.role not in valid_roles:
+        raise HTTPException(status_code=400, detail=f"Invalid role. Must be one of: {', '.join(valid_roles)}")
+    
+    # Create new user
+    new_user = UserORM(
+        email=registration.email,
+        name=registration.name,
+        role=registration.role
+    )
+    db.add(new_user)
+    db.commit()
+    db.refresh(new_user)
+    
+    # Create JWT token
+    access_token = create_access_token(
+        data={
+            "sub": new_user.email,
+            "user_id": new_user.id,
+            "role": new_user.role
+        },
+        expires_delta=timedelta(hours=8)
+    )
+    
+    return {
+        "access_token": access_token,
+        "token_type": "bearer",
+        "user": {
+            "id": new_user.id,
+            "email": new_user.email,
+            "name": new_user.name,
+            "role": new_user.role
+        }
+    }
+
+
 @app.get("/auth/me")
 async def get_me(current_user: CurrentUser = Depends(get_current_user)):
     """Get current logged-in user information"""
@@ -516,6 +749,7 @@ def list_restaurants(db: Session = Depends(get_db)):
                 id=r.id,
                 name=r.name,
                 description=r.description,
+                cuisine_type=r.cuisine_type,
                 latitude=r.latitude,
                 longitude=r.longitude,
                 delivery_fee_cents=r.delivery_fee_cents,
@@ -525,6 +759,7 @@ def list_restaurants(db: Session = Depends(get_db)):
                         name=mi.name,
                         description=mi.description,
                         price_cents=mi.price_cents,
+                        tags=mi.tags,
                     )
                     for mi in r.menu_items
                     if mi.is_active
@@ -549,6 +784,7 @@ def get_my_restaurant(
         id=restaurant.id,
         name=restaurant.name,
         description=restaurant.description,
+        cuisine_type=restaurant.cuisine_type,
         latitude=restaurant.latitude,
         longitude=restaurant.longitude,
         delivery_fee_cents=restaurant.delivery_fee_cents,
@@ -558,6 +794,7 @@ def get_my_restaurant(
                 name=mi.name,
                 description=mi.description,
                 price_cents=mi.price_cents,
+                tags=mi.tags,
             )
             for mi in restaurant.menu_items
             if mi.is_active

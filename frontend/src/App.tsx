@@ -6,13 +6,16 @@ import RestaurantDashboard from './RestaurantDashboard'
 import CentralDashboard from './CentralDashboard'
 import RestaurantPage from './RestaurantPage'
 import Login from './Login'
+import Signup from './Signup'
 import { User } from './api'
 
 type View = 'map' | 'student' | 'student-track' | 'steward' | 'restaurant' | 'central' | 'restaurant-page'
+type AuthView = 'login' | 'signup'
 
 export default function App() {
   const [user, setUser] = useState<User | null>(null)
   const [view, setView] = useState<View>('student')
+  const [authView, setAuthView] = useState<AuthView>('login')
   const [selectedRestaurantId, setSelectedRestaurantId] = useState<number>(1)
 
   // Check for existing user on mount
@@ -44,16 +47,18 @@ export default function App() {
     setUser(null)
   }
 
-  // Show login screen if not authenticated
+  // Show login/signup screen if not authenticated
   if (!user) {
-    return <Login onLogin={handleLogin} />
+    return authView === 'signup' 
+      ? <Signup onSignup={handleLogin} onSwitchToLogin={() => setAuthView('login')} />
+      : <Login onLogin={handleLogin} onSwitchToSignup={() => setAuthView('signup')} />
   }
 
   return (
     <main>
       <header className="header">
-        <h1>🚌 Transit-Link Delivery</h1>
-        <p>Unitrans-powered, eco-friendly delivery for Davis Downtown restaurants</p>
+        <h1>🚌 TransitLink Delivery</h1>
+        <p>Powered by <strong style={{color:'#DAAA00'}}>Unitrans</strong> · UC Davis downtown delivery</p>
         <div className="user-info">
           <span>👤 {user.name} ({user.role})</span>
           <button onClick={handleLogout} className="btn-logout">Logout</button>

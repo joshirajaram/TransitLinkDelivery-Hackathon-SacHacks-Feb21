@@ -24,6 +24,9 @@ export default function StudentOrder({ mode = 'place' }: StudentOrderProps) {
   const [lastBusRefresh, setLastBusRefresh] = useState<Date | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [orderSuccess, setOrderSuccess] = useState<Order | null>(null);
+  const [internalMode, setInternalMode] = useState<'place' | 'track'>(mode);
+  const [activeFilter, setActiveFilter] = useState('all');
   
   // Get current user
   const user: User | null = useMemo(
@@ -87,7 +90,42 @@ export default function StudentOrder({ mode = 'place' }: StudentOrderProps) {
 
   const formatDateTime = (value: string) => {
     const date = new Date(value);
-    return date.toLocaleString();
+    // Handle ISO string properly - ensure it's interpreted as local time
+    return date.toLocaleString('en-US', {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: true
+    });
+  };
+
+  // Check if a delivery window is still available for today
+  const isWindowAvailableToday = (window: Window): boolean => {
+    const now = new Date();
+    const [endHours, endMinutes, endSeconds] = window.end_time.split(':').map(Number);
+    
+    const endTimeToday = new Date();
+    endTimeToday.setHours(endHours, endMinutes, endSeconds, 0);
+    
+    // Window is available if current time is before window end time
+    return now < endTimeToday;
+  };
+
+  // Get reason why window is unavailable
+  const getWindowUnavailableReason = (window: Window): string => {
+    const now = new Date();
+    const [endHours, endMinutes] = window.end_time.split(':').map(Number);
+    
+    const endTimeToday = new Date();
+    endTimeToday.setHours(endHours, endMinutes, 0, 0);
+    
+    if (now >= endTimeToday) {
+      return `${window.label} expired at ${window.end_time.slice(0, 5)}`;
+    }
+    return '';
   };
 
   useEffect(() => {
@@ -135,6 +173,13 @@ export default function StudentOrder({ mode = 'place' }: StudentOrderProps) {
       return;
     }
 
+    // Check if selected window is still available
+    const selectedWindowObj = windows.find(w => w.id === selectedWindow);
+    if (selectedWindowObj && !isWindowAvailableToday(selectedWindowObj)) {
+      setError(`❌ ${selectedWindowObj.label} delivery window has closed for today. Please select another time window or try tomorrow.`);
+      return;
+    }
+
     const items = Object.entries(quantities)
       .filter(([_, qty]) => qty > 0)
       .map(([id, qty]) => ({
@@ -160,7 +205,10 @@ export default function StudentOrder({ mode = 'place' }: StudentOrderProps) {
       });
       setOrders(prev => [res.data, ...prev]);
       refreshOrders(false);
+      setOrderSuccess(res.data);
       resetOrder();
+      // Switch to order-tracking tab
+      setInternalMode('track');
     } catch (err: any) {
       setError(err.response?.data?.detail || 'Failed to place order');
     } finally {
@@ -174,6 +222,24 @@ export default function StudentOrder({ mode = 'place' }: StudentOrderProps) {
     setSelectedStop(null);
     setSelectedWindow(null);
   };
+
+  const FILTERS = [
+    { key: 'all',         label: 'All',           emoji: '🍽️' },
+    { key: 'vegan',       label: 'Vegan',         emoji: '🌱' },
+    { key: 'vegetarian',  label: 'Vegetarian',    emoji: '🥗' },
+    { key: 'non-veg',     label: 'Non-Veg',       emoji: '🍖' },
+    { key: 'beverages',   label: 'Beverages',     emoji: '🥤' },
+    { key: 'breakfast',   label: 'Breakfast',     emoji: '🍳' },
+    { key: 'spicy',       label: 'Spicy',         emoji: '🌶️' },
+    { key: 'gluten-free', label: 'Gluten-Free',   emoji: '🌾' },
+    { key: 'staff-pick',  label: 'Staff Pick',    emoji: '⭐' },
+    { key: 'ucd-favorite',label: 'UCD Fav',       emoji: '🎓' },
+  ];
+
+  const hasItemWithTag = (r: typeof restaurants[0], tag: string) =>
+    tag === 'all' || r.menu_items.some(mi => mi.tags?.split(',').map(t => t.trim()).includes(tag));
+
+  const filteredRestaurants = restaurants.filter(r => hasItemWithTag(r, activeFilter));
 
   const mapboxToken = import.meta.env.VITE_MAPBOX_TOKEN || '';
 
@@ -220,9 +286,29 @@ export default function StudentOrder({ mode = 'place' }: StudentOrderProps) {
       <h2>Order via Unitrans</h2>
       <p className="subtitle">Low-cost, eco-friendly delivery to your nearest bus stop</p>
 
+      {orderSuccess && (
+        <div className="order-success-banner">
+          <button className="order-success-dismiss" onClick={() => setOrderSuccess(null)}>×</button>
+          <div className="order-success-icon">🎉</div>
+          <div className="order-success-body">
+            <strong>Order #{orderSuccess.id} placed successfully!</strong>
+            <p>
+              {orderSuccess.restaurant_name} → {orderSuccess.stop?.name} &middot;
+              &nbsp;ETA ~25 min
+            </p>
+          </div>
+          <button
+            className="order-success-track-btn"
+            onClick={() => { setOrderSuccess(null); setInternalMode('track'); }}
+          >
+            Track order →
+          </button>
+        </div>
+      )}
+
       {error && <div className="error-message">{error}</div>}
 
-      {mode === 'track' && (
+      {internalMode === 'track' && (
         <>
           {activeOrder ? (
             <div className="order-confirmation">
@@ -233,6 +319,22 @@ export default function StudentOrder({ mode = 'place' }: StudentOrderProps) {
                 <p>Pickup: {activeOrder.stop.name} ({activeOrder.stop.code})</p>
                 <p>Time Window: {activeOrder.window.label} ({activeOrder.window.start_time.slice(0, 5)}–{activeOrder.window.end_time.slice(0, 5)})</p>
                 <p>Placed: {formatDateTime(activeOrder.created_at)}</p>
+                {activeOrder.estimated_delivery_time && (
+                  <p>📦 Expected delivery: {formatDateTime(activeOrder.estimated_delivery_time)}</p>
+                )}
+                {activeOrder.qr_code && (
+                  <div style={{ 
+                    backgroundColor: '#f5f5f5', 
+                    padding: '8px', 
+                    borderRadius: '4px',
+                    marginTop: '8px'
+                  }}>
+                    <p><strong>🔍 Package Code:</strong></p>
+                    <p style={{ fontSize: '14px', fontFamily: 'monospace', wordBreak: 'break-all' }}>
+                      {activeOrder.qr_code}
+                    </p>
+                  </div>
+                )}
 
                 <div className="status-tracker">
                   <div className="progress-bar-container">
@@ -379,89 +481,280 @@ export default function StudentOrder({ mode = 'place' }: StudentOrderProps) {
         </>
       )}
 
-      {mode === 'place' && (
-        <div className="order-form">
-          <div className="form-section">
-            <h3>1. Choose Restaurant</h3>
-            <select
-              value={selectedRestaurant ?? ''}
-              onChange={e => setSelectedRestaurant(Number(e.target.value))}
-              className="select-input"
-            >
-              <option value="">-- Select Restaurant --</option>
-              {restaurants.map(r => (
-                <option key={r.id} value={r.id}>
-                  {r.name} {r.description && `- ${r.description}`}
-                </option>
-              ))}
-            </select>
+      {internalMode === 'place' && (
+        <div className="order-wizard">
+
+          {/* ── Filter chips ── */}
+          <div className="filter-chips-bar">
+            {FILTERS.map(f => (
+              <button
+                key={f.key}
+                className={`filter-chip ${activeFilter === f.key ? 'active' : ''}`}
+                onClick={() => {
+                  setActiveFilter(f.key);
+                  // If current selection doesn't match the new filter, clear it
+                  if (selectedRestaurant) {
+                    const r = restaurants.find(r => r.id === selectedRestaurant);
+                    if (r && !hasItemWithTag(r, f.key)) {
+                      setSelectedRestaurant(null);
+                      setQuantities({});
+                    }
+                  }
+                }}
+              >
+                <span>{f.emoji}</span> {f.label}
+              </button>
+            ))}
           </div>
 
-          {currentRestaurant && (
-            <div className="form-section">
-              <h3>2. Choose Items</h3>
-              <div className="menu-items">
-                {currentRestaurant.menu_items.map(mi => (
-                  <div key={mi.id} className="menu-item">
-                    <div className="menu-item-info">
-                      <strong>{mi.name}</strong>
-                      {mi.description && <p className="item-description">{mi.description}</p>}
-                      <span className="item-price">${(mi.price_cents / 100).toFixed(2)}</span>
-                    </div>
-                    <input
-                      type="number"
-                      min={0}
-                      value={quantities[mi.id] ?? 0}
-                      onChange={e => handleQuantityChange(mi.id, Number(e.target.value))}
-                      className="quantity-input"
-                    />
-                  </div>
-                ))}
+          {/* ── Step progress bar ── */}
+          <div className="wizard-progress">
+            {[
+              { num: 1, label: 'Restaurant', done: !!selectedRestaurant },
+              { num: 2, label: 'Menu Items', done: Object.values(quantities).some(q => q > 0) },
+              { num: 3, label: 'Pickup Stop', done: !!selectedStop },
+              { num: 4, label: 'Time Window', done: !!selectedWindow },
+            ].map((step, idx, arr) => (
+              <div key={step.num} className="wizard-progress-item">
+                <div className={`wizard-step-bubble ${step.done ? 'done' : !arr.slice(0, idx).every(s => s.done) ? 'locked' : 'active'}`}>
+                  {step.done ? '✓' : step.num}
+                </div>
+                <span className="wizard-step-label">{step.label}</span>
+                {idx < arr.length - 1 && <div className={`wizard-connector ${step.done ? 'done' : ''}`} />}
               </div>
-              <p className="delivery-fee-note">
-                Delivery fee: ${(currentRestaurant.delivery_fee_cents / 100).toFixed(2)}
-              </p>
+            ))}
+          </div>
+
+          {/* ── Step 1: Restaurant ── */}
+          <div className="wizard-card">
+            <div className="wizard-card-header">
+              <span className="wizard-card-num">1</span>
+              <div>
+                <h3>Choose Restaurant</h3>
+                <p>Where would you like to order from?</p>
+              </div>
+              {selectedRestaurant && (
+                <span className="wizard-card-check">✓</span>
+              )}
+            </div>
+            <div className="restaurant-card-grid">
+              {filteredRestaurants.length === 0 ? (
+                <div className="filter-empty-state">
+                  <span>🔍</span>
+                  <p>No restaurants match <strong>{FILTERS.find(f => f.key === activeFilter)?.label}</strong>.</p>
+                  <button onClick={() => setActiveFilter('all')} className="filter-chip active">Show all</button>
+                </div>
+              ) : filteredRestaurants.map(r => (
+                <button
+                  key={r.id}
+                  className={`restaurant-select-card ${selectedRestaurant === r.id ? 'selected' : ''}`}
+                  onClick={() => { setSelectedRestaurant(r.id); setQuantities({}); }}
+                >
+                    <span className="restaurant-card-icon">{r.cuisine_type === 'Thai' ? '🍜' : r.cuisine_type === 'Pizza' ? '🍕' : r.cuisine_type === 'Mexican' ? '🌮' : r.cuisine_type === 'Mediterranean' ? '🥙' : r.cuisine_type === 'Bakery' ? '🥐' : r.cuisine_type === 'Vietnamese' ? '🍲' : r.cuisine_type === 'Breakfast' ? '🥞' : '🍽️'}</span>
+                    <span className="restaurant-card-name">{r.name}</span>
+                    {r.cuisine_type && <span className="restaurant-card-cuisine">{r.cuisine_type}</span>}
+                    {r.description && <span className="restaurant-card-desc">{r.description}</span>}
+                    <span className="restaurant-card-fee">
+                      Delivery: ${(r.delivery_fee_cents / 100).toFixed(2)}
+                    </span>
+                    {activeFilter !== 'all' && (
+                      <span className="restaurant-card-match">
+                        {r.menu_items.filter(mi => mi.tags?.split(',').map(t => t.trim()).includes(activeFilter)).length} match
+                      </span>
+                    )}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* ── Step 2: Menu Items (always visible) ── */}
+          <div className={`wizard-card ${!selectedRestaurant ? 'wizard-card-locked' : ''}`}>
+            <div className="wizard-card-header">
+              <span className={`wizard-card-num ${!selectedRestaurant ? 'locked' : ''}`}>2</span>
+              <div>
+                <h3>Choose Items</h3>
+                <p>{selectedRestaurant ? `Menu from ${currentRestaurant?.name}` : 'Select a restaurant first'}</p>
+              </div>
+              {Object.values(quantities).some(q => q > 0) && (
+                <span className="wizard-card-check">✓</span>
+              )}
+            </div>
+            {!selectedRestaurant ? (
+              <div className="wizard-step-placeholder">
+                <span>👆</span>
+                <p>Select a restaurant above to browse the menu</p>
+              </div>
+            ) : (
+              <div className="menu-cards-grid">
+                {currentRestaurant!.menu_items.map(mi => {
+                  const qty = quantities[mi.id] ?? 0;
+                  return (
+                    <div key={mi.id} className={`menu-card ${qty > 0 ? 'in-cart' : ''} ${
+                    activeFilter !== 'all' && !mi.tags?.split(',').map(t => t.trim()).includes(activeFilter)
+                      ? 'menu-card-dimmed' : ''
+                  }`}>
+                      <div className="menu-card-body">
+                        <div className="menu-card-emoji">{mi.tags?.includes('breakfast') ? '🍳' : mi.tags?.includes('beverages') ? '🥤' : mi.tags?.includes('vegan') ? '🌱' : mi.tags?.includes('spicy') ? '🌶️' : '🍽️'}</div>
+                        <div className="menu-card-info">
+                          <strong>{mi.name}</strong>
+                          {mi.description && <p>{mi.description}</p>}
+                          {mi.tags && (
+                            <div className="menu-item-tag-row">
+                              {mi.tags.split(',').map(t => t.trim()).filter(Boolean).map(tag => (
+                                <span key={tag} className={`item-tag item-tag-${tag}`}>{tag}</span>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                        <span className="menu-card-price">${(mi.price_cents / 100).toFixed(2)}</span>
+                      </div>
+                      <div className="menu-card-controls">
+                        <button
+                          className="qty-btn"
+                          onClick={() => handleQuantityChange(mi.id, qty - 1)}
+                          disabled={qty === 0}
+                        >−</button>
+                        <span className="qty-value">{qty}</span>
+                        <button
+                          className="qty-btn"
+                          onClick={() => handleQuantityChange(mi.id, qty + 1)}
+                        >+</button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          {/* ── Step 3: Pickup Stop ── */}
+          <div className="wizard-card">
+            <div className="wizard-card-header">
+              <span className="wizard-card-num">3</span>
+              <div>
+                <h3>Choose Pickup Stop</h3>
+                <p>Which bus stop will you pick up at?</p>
+              </div>
+              {selectedStop && <span className="wizard-card-check">✓</span>}
+            </div>
+            <div className="stop-cards-list">
+              {stops.map(s => (
+                <button
+                  key={s.id}
+                  className={`stop-card ${selectedStop === s.id ? 'selected' : ''}`}
+                  onClick={() => setSelectedStop(s.id)}
+                >
+                  <span className="stop-icon">🚏</span>
+                  <span className="stop-code">{s.code}</span>
+                  <span className="stop-name">{s.name}</span>
+                  {selectedStop === s.id && <span className="stop-check">✓</span>}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* ── Step 4: Time Window ── */}
+          <div className="wizard-card">
+            <div className="wizard-card-header">
+              <span className="wizard-card-num">4</span>
+              <div>
+                <h3>Choose Delivery Window</h3>
+                <p>
+                  Current time:&nbsp;
+                  <strong>
+                    {new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true })}
+                  </strong>
+                </p>
+              </div>
+              {selectedWindow && <span className="wizard-card-check">✓</span>}
+            </div>
+            <div className="window-cards-grid">
+              {windows.map(w => {
+                const available = isWindowAvailableToday(w);
+                return (
+                  <button
+                    key={w.id}
+                    className={`window-card ${selectedWindow === w.id ? 'selected' : ''} ${!available ? 'closed' : ''}`}
+                    onClick={() => available && setSelectedWindow(w.id)}
+                    disabled={!available}
+                  >
+                    <span className="window-time">
+                      {w.start_time.slice(0, 5)} – {w.end_time.slice(0, 5)}
+                    </span>
+                    <span className="window-label">{w.label}</span>
+                    <span className={`window-badge ${available ? 'open' : 'closed'}`}>
+                      {available ? '● Open' : '✕ Closed'}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* ── Order Summary + Submit ── */}
+          {(selectedRestaurant || selectedStop || selectedWindow || Object.values(quantities).some(q => q > 0)) && (
+            <div className="order-summary-card">
+              <h3>🧾 Order Summary</h3>
+              <div className="summary-rows">
+                <div className="summary-row">
+                  <span>Restaurant</span>
+                  <span>{currentRestaurant?.name ?? '—'}</span>
+                </div>
+                <div className="summary-row">
+                  <span>Pickup Stop</span>
+                  <span>{stops.find(s => s.id === selectedStop)?.name ?? '—'}</span>
+                </div>
+                <div className="summary-row">
+                  <span>Time Window</span>
+                  <span>{windows.find(w => w.id === selectedWindow)?.label ?? '—'}</span>
+                </div>
+                {currentRestaurant && Object.entries(quantities).filter(([,q]) => q > 0).map(([id, qty]) => {
+                  const item = currentRestaurant.menu_items.find(mi => mi.id === Number(id));
+                  return item ? (
+                    <div key={id} className="summary-row item-row">
+                      <span>{qty}× {item.name}</span>
+                      <span>${((item.price_cents * qty) / 100).toFixed(2)}</span>
+                    </div>
+                  ) : null;
+                })}
+                {currentRestaurant && (
+                  <>
+                    <div className="summary-row">
+                      <span>Delivery Fee</span>
+                      <span>${(currentRestaurant.delivery_fee_cents / 100).toFixed(2)}</span>
+                    </div>
+                    <div className="summary-row total-row">
+                      <strong>Total</strong>
+                      <strong>
+                        ${((
+                          Object.entries(quantities)
+                            .filter(([,q]) => q > 0)
+                            .reduce((acc, [id, qty]) => {
+                              const item = currentRestaurant.menu_items.find(mi => mi.id === Number(id));
+                              return acc + (item ? item.price_cents * qty : 0);
+                            }, 0) + currentRestaurant.delivery_fee_cents
+                        ) / 100).toFixed(2)}
+                      </strong>
+                    </div>
+                  </>
+                )}
+              </div>
             </div>
           )}
 
-          <div className="form-section">
-            <h3>3. Choose Pickup Stop</h3>
-            <select
-              value={selectedStop ?? ''}
-              onChange={e => setSelectedStop(Number(e.target.value))}
-              className="select-input"
-            >
-              <option value="">-- Select Stop --</option>
-              {stops.map(s => (
-                <option key={s.id} value={s.id}>
-                  {s.code} – {s.name}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div className="form-section">
-            <h3>4. Choose Time Window</h3>
-            <select
-              value={selectedWindow ?? ''}
-              onChange={e => setSelectedWindow(Number(e.target.value))}
-              className="select-input"
-            >
-              <option value="">-- Select Window --</option>
-              {windows.map(w => (
-                <option key={w.id} value={w.id}>
-                  {w.label} ({w.start_time.slice(0, 5)}–{w.end_time.slice(0, 5)})
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <button 
-            onClick={placeOrder} 
-            disabled={loading || !selectedRestaurant || !selectedStop || !selectedWindow}
-            className="btn-primary"
+          <button
+            onClick={placeOrder}
+            disabled={
+              loading ||
+              !selectedRestaurant ||
+              !selectedStop ||
+              !selectedWindow ||
+              !Object.values(quantities).some(q => q > 0) ||
+              !!(selectedWindow && !isWindowAvailableToday(windows.find(w => w.id === selectedWindow)!))
+            }
+            className="place-order-btn"
           >
-            {loading ? 'Placing Order...' : 'Place Order'}
+            {loading ? '⏳ Placing Order…' : '🛒 Place Order'}
           </button>
         </div>
       )}

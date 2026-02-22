@@ -12,12 +12,19 @@ const STATUS_ORDER = [
   'CANCELLED'
 ];
 
+interface QRCodeData {
+  qr_code: string;
+  qr_data_url: string;
+}
+
 export default function RestaurantDashboard() {
   const [restaurant, setRestaurant] = useState<Restaurant | null>(null);
   const [orders, setOrders] = useState<Order[]>([]);
+  const [qrCodes, setQrCodes] = useState<{ [key: number]: QRCodeData }>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [updating, setUpdating] = useState<number | null>(null);
+  const [expandedOrder, setExpandedOrder] = useState<number | null>(null);
 
   // Load restaurant info
   useEffect(() => {
@@ -36,8 +43,21 @@ export default function RestaurantDashboard() {
     
     try {
       const res = await apiClient.getRestaurantOrders(restaurant.id);
-      setOrders(res.data.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()));
+      const sortedOrders = res.data.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+      setOrders(sortedOrders);
       setError(null);
+      
+      // Load QR codes for orders that need them
+      for (const order of sortedOrders) {
+        if (!qrCodes[order.id]) {
+          try {
+            const qrRes = await apiClient.getOrderQRCode(order.id);
+            setQrCodes(prev => ({ ...prev, [order.id]: qrRes.data }));
+          } catch (err) {
+            // Silently fail, not critical
+          }
+        }
+      }
     } catch (err: any) {
       setError('Failed to load orders');
     } finally {
@@ -86,6 +106,15 @@ export default function RestaurantDashboard() {
     }
   };
 
+  const formatETA = (eta: string | undefined): string => {
+    if (!eta) return 'N/A';
+    const etaDate = new Date(eta);
+    const now = new Date();
+    const diffMs = etaDate.getTime() - now.getTime();
+    const diffMins = Math.max(0, Math.round(diffMs / 60000));
+    return `${diffMins} min`;
+  };
+
   if (loading) {
     return <div className="restaurant-dashboard"><p>Loading...</p></div>;
   }
@@ -122,10 +151,20 @@ export default function RestaurantDashboard() {
         ) : (
           orders.map(order => {
             const nextStatus = getNextStatus(order.status);
+            const qrData = qrCodes[order.id];
+            const isExpanded = expandedOrder === order.id;
+            
             return (
               <div key={order.id} className="order-card">
                 <div className="order-header">
-                  <h3>Order #{order.id}</h3>
+                  <div style={{ flex: 1 }}>
+                    <h3>Order #{order.id}</h3>
+                    {order.estimated_delivery_time && (
+                      <p style={{ fontSize: '0.9em', color: '#666', margin: '4px 0 0 0' }}>
+                        ⏱️ ETA: {formatETA(order.estimated_delivery_time)}
+                      </p>
+                    )}
+                  </div>
                   <span 
                     className="status-badge" 
                     style={{ backgroundColor: getStatusColor(order.status) }}
@@ -147,9 +186,31 @@ export default function RestaurantDashboard() {
                     <span>Drop-off:</span>
                     <span>{order.stop.name} ({order.stop.code})</span>
                   </div>
-                  <div className="detail-row highlight">
-                    <span>📦 Package QR Code:</span>
-                    <span className="qr-code-large">{order.qr_code}</span>
+                  
+                  {/* QR Code Section */}
+                  <div className="detail-row highlight" style={{ flexDirection: 'column', alignItems: 'flex-start' }}>
+                    <span style={{ marginBottom: '8px' }}>📦 Package QR Code:</span>
+                    {qrData && qrData.qr_data_url ? (
+                      <div style={{ 
+                        display: 'flex', 
+                        gap: '12px', 
+                        alignItems: 'center',
+                        backgroundColor: '#f5f5f5',
+                        padding: '8px',
+                        borderRadius: '4px'
+                      }}>
+                        <img 
+                          src={qrData.qr_data_url} 
+                          alt="QR Code" 
+                          style={{ width: '100px', height: '100px' }}
+                        />
+                        <code style={{ fontSize: '12px', wordBreak: 'break-all' }}>
+                          {order.qr_code}
+                        </code>
+                      </div>
+                    ) : (
+                      <span className="qr-code-large">{order.qr_code}</span>
+                    )}
                   </div>
                 </div>
 
@@ -167,11 +228,29 @@ export default function RestaurantDashboard() {
                   </div>
                 </div>
 
+                {/* Status Timeline */}
+                <div style={{ 
+                  fontSize: '12px', 
+                  marginTop: '12px', 
+                  padding: '8px', 
+                  backgroundColor: '#f9f9f9',
+                  borderRadius: '4px'
+                }}>
+                  <div style={{ marginBottom: '6px' }}>📅 Status Timeline:</div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '6px', fontSize: '11px' }}>
+                    <div>✓ Accepted: {order.accepted_at ? new Date(order.accepted_at).toLocaleTimeString() : '-'}</div>
+                    <div>✓ Ready: {order.ready_at ? new Date(order.ready_at).toLocaleTimeString() : '-'}</div>
+                    <div>✓ On Bus: {order.on_bus_at ? new Date(order.on_bus_at).toLocaleTimeString() : '-'}</div>
+                    <div>✓ Done: {order.completed_at ? new Date(order.completed_at).toLocaleTimeString() : '-'}</div>
+                  </div>
+                </div>
+
                 {nextStatus && order.status !== 'COMPLETED' && order.status !== 'CANCELLED' && (
                   <button
                     onClick={() => handleStatusChange(order.id, nextStatus)}
                     disabled={updating === order.id}
                     className="btn-primary"
+                    style={{ marginTop: '12px', width: '100%' }}
                   >
                     {updating === order.id ? 'Updating...' : `Mark as ${nextStatus.replace(/_/g, ' ')}`}
                   </button>

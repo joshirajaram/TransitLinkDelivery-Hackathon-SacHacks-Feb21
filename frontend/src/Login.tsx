@@ -3,6 +3,7 @@ import { login, googleAuth } from './api';
 
 interface LoginProps {
   onLogin: (user: any) => void;
+  onSwitchToSignup?: () => void;
 }
 
 // Google Sign-In configuration
@@ -14,10 +15,11 @@ declare global {
   }
 }
 
-const Login = ({ onLogin }: LoginProps) => {
+const Login = ({ onLogin, onSwitchToSignup }: LoginProps) => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
+  const [errorKey, setErrorKey] = useState(0);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
@@ -62,6 +64,7 @@ const Login = ({ onLogin }: LoginProps) => {
       onLogin(result.user);
     } catch (err: any) {
       setError(err.response?.data?.detail || 'Google sign-in failed');
+      setErrorKey(k => k + 1);
     } finally {
       setLoading(false);
     }
@@ -79,6 +82,7 @@ const Login = ({ onLogin }: LoginProps) => {
       onLogin(response.user);
     } catch (err: any) {
       setError(err.response?.data?.detail || 'Login failed');
+      setErrorKey(k => k + 1);
     } finally {
       setLoading(false);
     }
@@ -134,7 +138,16 @@ const Login = ({ onLogin }: LoginProps) => {
             />
           </div>
 
-          {error && <div className="error-message">{error}</div>}
+          {error && (
+            <div key={errorKey} className="error-message login-error-message">
+              <span>{error}</span>
+              <button
+                onClick={() => setError('')}
+                className="error-dismiss"
+                aria-label="Dismiss"
+              >×</button>
+            </div>
+          )}
 
           <button type="submit" className="btn-primary" disabled={loading}>
             {loading ? 'Logging in...' : 'Log In with Email'}
@@ -145,6 +158,10 @@ const Login = ({ onLogin }: LoginProps) => {
           <p>🔐 Secure Authentication</p>
           <small>Sign in with Google or your UC Davis account</small>
         </div>
+
+        <div className="signup-prompt">
+          <p>Don't have an account? <a href="#" onClick={(e) => { e.preventDefault(); onSwitchToSignup?.() }} style={{ cursor: 'pointer' }}>Sign up here</a></p>
+        </div>
       </div>
 
       <style>{`
@@ -153,7 +170,7 @@ const Login = ({ onLogin }: LoginProps) => {
           display: flex;
           align-items: center;
           justify-content: center;
-          background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+          background: linear-gradient(135deg, #002855 0%, #1D4F91 100%);
           padding: 20px;
         }
 
@@ -164,22 +181,26 @@ const Login = ({ onLogin }: LoginProps) => {
           padding: 40px;
           max-width: 480px;
           width: 100%;
+          border-top: 5px solid #DAAA00;
         }
 
         .login-header {
           text-align: center;
           margin-bottom: 32px;
+          padding-bottom: 20px;
+          border-bottom: 2px solid #DAAA00;
         }
 
         .login-header h1 {
-          font-size: 28px;
-          margin: 0 0 8px 0;
-          color: #1a202c;
+          font-size: 26px;
+          margin: 0 0 6px 0;
+          color: #002855;
         }
 
         .login-header p {
           color: #718096;
           margin: 0;
+          font-size: 13px;
         }
 
         .login-form {
@@ -210,7 +231,7 @@ const Login = ({ onLogin }: LoginProps) => {
 
         .form-group input:focus {
           outline: none;
-          border-color: #667eea;
+          border-color: #1D4F91;
         }
 
         .form-group input:disabled {
@@ -218,16 +239,47 @@ const Login = ({ onLogin }: LoginProps) => {
           cursor: not-allowed;
         }
 
-        .error-message {
-          background: #fed7d7;
-          color: #c53030;
-          padding: 12px;
-          border-radius: 8px;
-          font-size: 14px;
+        @keyframes loginShake {
+          0%, 100% { transform: translateX(0); }
+          15%       { transform: translateX(-7px); }
+          30%       { transform: translateX(7px); }
+          45%       { transform: translateX(-5px); }
+          60%       { transform: translateX(5px); }
+          75%       { transform: translateX(-3px); }
+          90%       { transform: translateX(3px); }
         }
 
+        .login-error-message {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 8px;
+          background: #fff1f0;
+          border: 1.5px solid #fca5a5;
+          color: #b91c1c;
+          padding: 12px 14px;
+          border-radius: 8px;
+          font-size: 14px;
+          font-weight: 500;
+          animation: loginShake 0.45s ease;
+        }
+
+        .error-dismiss {
+          background: none;
+          border: none;
+          color: #b91c1c;
+          font-size: 18px;
+          line-height: 1;
+          cursor: pointer;
+          padding: 0 2px;
+          opacity: 0.7;
+          flex-shrink: 0;
+        }
+
+        .error-dismiss:hover { opacity: 1; }
+
         .btn-primary {
-          background: #667eea;
+          background: #002855;
           color: white;
           border: none;
           padding: 14px;
@@ -239,7 +291,7 @@ const Login = ({ onLogin }: LoginProps) => {
         }
 
         .btn-primary:hover:not(:disabled) {
-          background: #5568d3;
+          background: #1D4F91;
         }
 
         .btn-primary:disabled {
@@ -323,6 +375,29 @@ const Login = ({ onLogin }: LoginProps) => {
         .login-footer small {
           color: #a0aec0;
           font-size: 12px;
+        }
+
+        .signup-prompt {
+          margin-top: 16px;
+          text-align: center;
+        }
+
+        .signup-prompt p {
+          margin: 0;
+          color: #4a5568;
+          font-size: 14px;
+        }
+
+        .signup-prompt a {
+          color: #1D4F91;
+          text-decoration: none;
+          font-weight: 600;
+          transition: color 0.2s;
+        }
+
+        .signup-prompt a:hover {
+          color: #002855;
+          text-decoration: underline;
         }
       `}</style>
     </div>

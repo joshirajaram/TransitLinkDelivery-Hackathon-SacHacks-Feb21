@@ -53,6 +53,13 @@ class UserLogin(BaseModel):
     password: str  # For demo/testing only; production uses CAS
 
 
+class UserRegister(BaseModel):
+    email: str
+    name: str
+    password: str
+    role: str  # STUDENT, RESTAURANT_OWNER, STEWARD, or ADMIN
+
+
 class CurrentUser(BaseModel):
     id: int
     email: str
