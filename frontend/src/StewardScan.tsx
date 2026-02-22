@@ -1,8 +1,12 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { apiClient, Order } from './api';
+
+const ROUTE_OPTIONS = ['A', 'B', 'C', 'D', 'E', 'G', 'J', 'K', 'L', 'P', 'Q', 'S', 'T', 'U', 'V', 'W', 'X', 'Z'];
 
 export default function StewardScan() {
   const [code, setCode] = useState('');
+  const [route, setRoute] = useState('');
+  const [busId, setBusId] = useState('');
   const [result, setResult] = useState<Order | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -12,13 +16,17 @@ export default function StewardScan() {
       setError('Please enter a QR code');
       return;
     }
+    if (!route.trim()) {
+      setError('Please select your route');
+      return;
+    }
 
     setLoading(true);
     setError(null);
     setResult(null);
 
     try {
-      const res = await apiClient.stewardScan(code.trim());
+      const res = await apiClient.stewardScan(code.trim(), route.trim(), busId.trim() || undefined);
       setResult(res.data);
       setCode(''); // Clear input after successful scan
     } catch (err: any) {
@@ -35,13 +43,30 @@ export default function StewardScan() {
     }
   };
 
+  const statusMessage = useMemo(() => {
+    if (!result) return '';
+    if (result.status === 'ON_BUS') return '📦 Order loaded on bus.';
+    if (result.status === 'COMPLETED') return '✅ Order completed.';
+    return `Status: ${result.status}`;
+  }, [result]);
+
   return (
     <div className="steward-scan-view">
       <h2>🚌 Steward Delivery Verification</h2>
-      <p className="subtitle">Scan or enter QR code to verify student pickup</p>
+      <p className="subtitle">Scan at pickup to load, scan again to complete</p>
 
       <div className="scan-section">
         <div className="input-group">
+          <select
+            value={route}
+            onChange={e => setRoute(e.target.value)}
+            className="select-input"
+          >
+            <option value="">Select your route</option>
+            {ROUTE_OPTIONS.map(option => (
+              <option key={option} value={option}>{option}</option>
+            ))}
+          </select>
           <input
             type="text"
             value={code}
@@ -51,9 +76,16 @@ export default function StewardScan() {
             className="scan-input"
             autoFocus
           />
+          <input
+            type="text"
+            value={busId}
+            onChange={e => setBusId(e.target.value)}
+            placeholder="Bus ID (optional)"
+            className="scan-input"
+          />
           <button 
             onClick={handleScan} 
-            disabled={loading || !code.trim()}
+            disabled={loading || !code.trim() || !route.trim()}
             className="btn-primary"
           >
             {loading ? 'Verifying...' : 'Verify Pickup'}
@@ -69,7 +101,8 @@ export default function StewardScan() {
 
       {result && (
         <div className="success-message">
-          <h3>✅ Order #{result.id} Completed!</h3>
+          <h3>Order #{result.id}</h3>
+          <p>{statusMessage}</p>
           <div className="order-summary">
             <div className="summary-row">
               <span>Restaurant:</span>
@@ -100,11 +133,10 @@ export default function StewardScan() {
       <div className="instructions">
         <h3>Instructions:</h3>
         <ul>
-          <li>Ask student to show their QR code</li>
-          <li>Scan with camera or enter code manually</li>
-          <li>Verify student name matches order</li>
-          <li>Hand over food package</li>
-          <li>Confirm completion in system</li>
+          <li>Select the route you are operating</li>
+          <li>Scan at the restaurant to mark ON BUS</li>
+          <li>Scan again at drop-off to complete</li>
+          <li>Verify student matches the order</li>
         </ul>
       </div>
     </div>

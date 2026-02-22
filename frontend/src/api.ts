@@ -81,6 +81,12 @@ export interface Stop {
   longitude: number;
 }
 
+export interface ClosestStopResponse {
+  stop: Stop;
+  distance_m: number;
+  downtown_routes_available: string[];
+}
+
 export interface Window {
   id: number;
   bus_route_tag?: string | null;
@@ -162,6 +168,8 @@ export const apiClient = {
   getRestaurants: () => api.get<Restaurant[]>('/restaurants'),
   getMyRestaurant: () => api.get<Restaurant>('/restaurants/my-restaurant'),
   getStops: () => api.get<Stop[]>('/stops'),
+  getClosestDowntownStop: (latitude: number, longitude: number) =>
+    api.post<ClosestStopResponse>('/stops/closest-downtown', { latitude, longitude }),
   getWindows: () => api.get<Window[]>('/windows'),
   createOrder: (data: CreateOrderRequest) => api.post<Order>('/orders', data),
   getOrder: (orderId: number) => api.get<Order>(`/orders/${orderId}`),
@@ -170,7 +178,8 @@ export const apiClient = {
   updateOrderStatus: (orderId: number, status: string, busRouteTag?: string) =>
     api.patch<Order>(`/orders/${orderId}/status`, { status, bus_route_tag: busRouteTag }),
   getOrderQRCode: (orderId: number) => api.get<any>(`/orders/${orderId}/qr-code`).then(res => res.data),
-  stewardScan: (qrCode: string) => api.post<Order>('/steward/scan', { qr_code: qrCode }),
+  stewardScan: (qrCode: string, routeTag?: string, busId?: string) =>
+    api.post<Order>('/steward/scan', { qr_code: qrCode, route_tag: routeTag, bus_id: busId }),
   getStewardOrders: (route?: string) =>
     api.get<StewardOrdersResponse>('/steward/orders', {
       params: route ? { route } : undefined,

@@ -18,6 +18,23 @@ DDBA_DOWNTOWN_PERIMETER_COORDS: list[tuple[float, float]] = [
 ]
 
 
+def get_downtown_route_tags(
+    bus_locations: Optional[Iterable[BusLocation]] = None,
+    perimeter_coords: list[tuple[float, float]] = DDBA_DOWNTOWN_PERIMETER_COORDS,
+) -> set[str]:
+    if not bus_locations:
+        return set()
+
+    perimeter_polygon = Polygon([(lon, lat) for lat, lon in perimeter_coords])
+    tags: set[str] = set()
+
+    for bus in bus_locations:
+        if perimeter_polygon.contains(Point(bus.longitude, bus.latitude)):
+            tags.add(bus.route_tag.lower())
+
+    return tags
+
+
 def _distance_meters(a: tuple[float, float], b: tuple[float, float]) -> float:
     return geodesic(a, b).meters
 

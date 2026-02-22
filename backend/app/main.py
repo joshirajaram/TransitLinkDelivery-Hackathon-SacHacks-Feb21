@@ -11,12 +11,14 @@ from datetime import datetime, timedelta, time as dt_time
 from typing import Any
 
 import httpx
+from geopy.distance import geodesic
 import qrcode
 import xmltodict
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from sqlalchemy import and_, desc, or_
+from shapely.geometry import Point, Polygon
+from sqlalchemy import desc
 from sqlalchemy.orm import Session
 
 from .auth import (
@@ -45,7 +47,11 @@ from .db import (
     UserORM,
     init_db,
 )
-from .logistics_engine import find_closest_stop_to_downtown_perimeter, find_optimal_bus_line
+from .logistics_engine import (
+    DDBA_DOWNTOWN_PERIMETER_COORDS,
+    find_closest_stop_to_downtown_perimeter,
+    find_optimal_bus_line,
+)
 from .bus_matching import find_best_bus_for_order
 from .models import BusLocation, BusStop, DeliveryWindow, MenuItem, Order, OrderStatus, Restaurant, UnitransStop, UserRole
 
@@ -57,6 +63,8 @@ POLL_INTERVAL_SECONDS = 15
 
 bus_location_cache: list[BusLocation] = []
 cache_lock = asyncio.Lock()
+route_config_cache: dict[str, Any] = {"routes": [], "fetched_at": 0.0}
+ROUTE_CONFIG_TTL_SECONDS = 60 * 60 * 6
 
 
 # Database dependency
@@ -77,6 +85,109 @@ async def fetch_vehicle_locations_xml(client: httpx.AsyncClient) -> str:
     response = await client.get(UNITRANS_FEED_URL, params=params)
     response.raise_for_status()
     return response.text
+
+async def fetch_route_config_xml(client: httpx.AsyncClient) -> str:
+    params = {
+        "command": "routeConfig",
+        "a": "unitrans",
+    }
+    response = await client.get(UNITRANS_FEED_URL, params=params)
+    response.raise_for_status()
+    return response.text
+
+
+def parse_route_config_xml(xml_payload: str) -> list[dict[str, Any]]:
+    data = xmltodict.parse(xml_payload)
+    body = data.get("body", {})
+    routes = body.get("route", [])
+    if isinstance(routes, dict):
+        routes = [routes]
+
+    parsed_routes: list[dict[str, Any]] = []
+
+    def get_attr(record: dict, key: str, default: str | None = None) -> str | None:
+        return record.get(f"@{key}", record.get(key, default))
+
+    for route in routes:
+        tag = get_attr(route, "tag")
+        title = get_attr(route, "title")
+        stops = route.get("stop", [])
+        if isinstance(stops, dict):
+            stops = [stops]
+
+        stop_list = []
+        for stop in stops:
+            lat = get_attr(stop, "lat")
+            lon = get_attr(stop, "lon")
+            if lat is None or lon is None:
+                continue
+            stop_list.append(
+                {
+                    "tag": get_attr(stop, "tag"),
+                    "title": get_attr(stop, "title"),
+                    "lat": float(lat),
+                    "lon": float(lon),
+                }
+            )
+
+        if tag:
+            parsed_routes.append({"tag": str(tag), "title": title, "stops": stop_list})
+
+    return parsed_routes
+
+
+async def get_route_config() -> list[dict[str, Any]]:
+    now = time.time()
+    if route_config_cache["routes"] and now - route_config_cache["fetched_at"] < ROUTE_CONFIG_TTL_SECONDS:
+        return route_config_cache["routes"]
+
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        xml_payload = await fetch_route_config_xml(client)
+    routes = parse_route_config_xml(xml_payload)
+    route_config_cache["routes"] = routes
+    route_config_cache["fetched_at"] = now
+    return routes
+
+
+def build_downtown_routes_map(routes: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
+    perimeter_polygon = Polygon(
+        [(lon, lat) for lat, lon in DDBA_DOWNTOWN_PERIMETER_COORDS]
+    )
+    downtown_routes: dict[str, list[dict[str, Any]]] = {}
+    for route in routes:
+        tag = str(route.get("tag", "")).lower()
+        stops = route.get("stops") or []
+        if any(
+            perimeter_polygon.contains(Point(stop["lon"], stop["lat"]))
+            for stop in stops
+        ):
+            downtown_routes[tag] = stops
+    return downtown_routes
+
+
+def choose_route_from_map(
+    route_map: dict[str, list[dict[str, Any]]],
+    restaurant_coords: tuple[float, float],
+    customer_coords: tuple[float, float],
+) -> str | None:
+    best_tag = None
+    best_score = None
+    for tag, stops in route_map.items():
+        if not stops:
+            continue
+        dist_rest = min(
+            geodesic(restaurant_coords, (stop["lat"], stop["lon"])).meters
+            for stop in stops
+        )
+        dist_cust = min(
+            geodesic(customer_coords, (stop["lat"], stop["lon"])).meters
+            for stop in stops
+        )
+        score = dist_rest + dist_cust
+        if best_score is None or score < best_score:
+            best_score = score
+            best_tag = tag
+    return best_tag
 
 
 def parse_vehicle_locations_xml(xml_payload: str) -> list[BusLocation]:
@@ -355,6 +466,9 @@ def seed_demo_data(db: Session) -> None:
         ("ARC",   "Activities & Recreation Center","West campus",               38.5378, -121.7588),
         ("COHO",  "CoHo / South Silo",            "South campus dining area",  38.5382, -121.7500),
         ("SHIELDS","Shields Library",             "Central library stop",       38.5407, -121.7490),
+        ("DDBA",  "Downtown Davis (3rd & G)",      "Downtown core stop",         38.5440, -121.7410),
+        ("3RD_ST","3rd St & E",                   "Downtown corridor",         38.5429, -121.7444),
+        ("G_ST",  "G St & 2nd",                   "Downtown corridor",         38.5436, -121.7422),
     ]
     for code, name, desc, lat, lon in stop_data:
         if not db.query(UnitransStopORM).filter(UnitransStopORM.code == code).first():
@@ -505,6 +619,8 @@ class UpdateStatusIn(BaseModel):
 
 class QRScanIn(BaseModel):
     qr_code: str
+    route_tag: str | None = None
+    bus_id: str | None = None
 
 
 class StewardOrdersOut(BaseModel):
@@ -536,6 +652,17 @@ class DashboardData(BaseModel):
     stats: DashboardStats
     restaurant_performance: list[RestaurantStats]
     recent_orders: list[OrderOut]
+
+
+class LocationIn(BaseModel):
+    latitude: float
+    longitude: float
+
+
+class ClosestStopOut(BaseModel):
+    stop: StopOut
+    distance_m: float
+    downtown_routes_available: list[str]
 
 
 # ========== API Endpoints ==========
@@ -824,6 +951,58 @@ def list_stops(db: Session = Depends(get_db)):
     return [StopOut.model_validate(s) for s in stops]
 
 
+@app.post("/stops/closest-downtown", response_model=ClosestStopOut)
+def closest_downtown_stop(
+    payload: LocationIn,
+    db: Session = Depends(get_db),
+):
+    routes = asyncio.run(get_route_config())
+    if not routes:
+        raise HTTPException(503, "No static route data available")
+
+    downtown_map = build_downtown_routes_map(routes)
+    if not downtown_map:
+        raise HTTPException(503, "No downtown-serving routes available")
+
+    candidate_stops = [stop for stops in downtown_map.values() for stop in stops]
+    if not candidate_stops:
+        raise HTTPException(503, "No downtown-serving stops available")
+
+    closest_candidate = min(
+        candidate_stops,
+        key=lambda stop: geodesic(
+            (payload.latitude, payload.longitude),
+            (stop["lat"], stop["lon"]),
+        ).meters,
+    )
+
+    stop_code = str(closest_candidate.get("tag") or "").strip()
+    stop_name = str(closest_candidate.get("title") or stop_code)
+    existing_stop = db.query(UnitransStopORM).filter(UnitransStopORM.code == stop_code).first()
+    if not existing_stop:
+        existing_stop = UnitransStopORM(
+            code=stop_code,
+            name=stop_name,
+            description="Imported from Unitrans route config",
+            latitude=float(closest_candidate["lat"]),
+            longitude=float(closest_candidate["lon"]),
+        )
+        db.add(existing_stop)
+        db.commit()
+        db.refresh(existing_stop)
+
+    distance_m = geodesic(
+        (payload.latitude, payload.longitude),
+        (existing_stop.latitude, existing_stop.longitude),
+    ).meters
+
+    return ClosestStopOut(
+        stop=StopOut.model_validate(existing_stop),
+        distance_m=round(distance_m, 2),
+        downtown_routes_available=sorted(downtown_map.keys()),
+    )
+
+
 @app.get("/windows", response_model=list[WindowOut])
 def list_windows(db: Session = Depends(get_db)):
     windows = db.query(DeliveryWindowORM).filter(DeliveryWindowORM.is_active == True).all()
@@ -1059,6 +1238,24 @@ def update_order_status(
         if not restaurant:
             raise HTTPException(403, "Access denied: Not your order")
 
+        def ensure_downtown_route_assignment() -> None:
+            if order.bus_route_tag:
+                return
+            routes = asyncio.run(get_route_config())
+            if not routes:
+                raise HTTPException(503, "No static route data available")
+            downtown_map = build_downtown_routes_map(routes)
+            if not downtown_map:
+                raise HTTPException(503, "No downtown-serving routes available")
+            assigned_tag = choose_route_from_map(
+                downtown_map,
+                (order.restaurant.latitude, order.restaurant.longitude),
+                (order.stop.latitude, order.stop.longitude),
+            )
+            if not assigned_tag:
+                raise HTTPException(503, "Unable to assign a downtown-serving route")
+            order.bus_route_tag = assigned_tag
+
         allowed_transitions: dict[str, set[str]] = {
             OrderStatus.PENDING.value: {OrderStatus.PREPARING.value, OrderStatus.NOT_ACCEPTED.value},
             OrderStatus.ACCEPTED.value: {OrderStatus.PREPARING.value},
@@ -1066,6 +1263,8 @@ def update_order_status(
         }
         if next_status not in allowed_transitions.get(order.status, set()):
             raise HTTPException(400, f"Invalid status transition from {order.status} to {next_status}")
+        if next_status in {OrderStatus.PREPARING.value, OrderStatus.READY_FOR_PICKUP.value}:
+            ensure_downtown_route_assignment()
         order.status = next_status
     elif current_user.role == UserRole.STEWARD:
         allowed_transitions: dict[str, set[str]] = {
@@ -1123,11 +1322,38 @@ def steward_scan(
     order = db.query(OrderORM).filter(OrderORM.qr_code == payload.qr_code).first()
     if not order:
         raise HTTPException(404, "Invalid code")
-    
-    if order.status not in [OrderStatus.ON_BUS.value, OrderStatus.AT_STOP.value]:
-        raise HTTPException(400, f"Order not ready for pickup. Current status: {order.status}")
 
-    order.status = OrderStatus.COMPLETED.value
+    if order.status == OrderStatus.READY_FOR_PICKUP.value:
+        route_tag = (payload.route_tag or "").strip()
+        if not route_tag:
+            raise HTTPException(400, "route_tag is required for pickup scan")
+        if not order.bus_route_tag:
+            raise HTTPException(400, "Order has no assigned route")
+        if order.bus_route_tag.lower() != route_tag.lower():
+            raise HTTPException(400, "Route tag does not match assigned route")
+        if payload.bus_id:
+            order.bus_id = payload.bus_id
+        else:
+            matching_buses = [
+                bus for bus in bus_location_cache
+                if bus.route_tag.lower() == order.bus_route_tag.lower()
+            ]
+            if matching_buses:
+                closest_bus = min(
+                    matching_buses,
+                    key=lambda bus: geodesic(
+                        (order.restaurant.latitude, order.restaurant.longitude),
+                        (bus.latitude, bus.longitude),
+                    ).meters,
+                )
+                order.bus_id = str(closest_bus.vehicle_id)
+        order.status = OrderStatus.ON_BUS.value
+    elif order.status == OrderStatus.ON_BUS.value:
+        order.status = OrderStatus.COMPLETED.value
+    elif order.status == OrderStatus.AT_STOP.value:
+        order.status = OrderStatus.COMPLETED.value
+    else:
+        raise HTTPException(400, f"Order not ready for scan. Current status: {order.status}")
     db.commit()
     db.refresh(order)
 
@@ -1174,15 +1400,7 @@ async def get_steward_orders(
     active_query = db.query(OrderORM).filter(OrderORM.status.in_(active_statuses))
     completed_query = db.query(OrderORM).filter(OrderORM.status == OrderStatus.COMPLETED.value)
 
-    active_query = active_query.filter(
-        or_(
-            and_(
-                OrderORM.status == OrderStatus.READY_FOR_PICKUP.value,
-                OrderORM.bus_route_tag.is_(None),
-            ),
-            OrderORM.bus_route_tag == route_value,
-        )
-    )
+    active_query = active_query.filter(OrderORM.bus_route_tag == route_value)
     completed_query = completed_query.filter(OrderORM.bus_route_tag == route_value)
 
     active_orders = active_query.order_by(OrderORM.created_at.desc()).all()

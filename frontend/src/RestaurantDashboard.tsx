@@ -193,6 +193,10 @@ export default function RestaurantDashboard() {
                     <span>Drop-off:</span>
                     <span>{order.stop.name} ({order.stop.code})</span>
                   </div>
+                  <div className="detail-row">
+                    <span>Assigned Route:</span>
+                    <span>{order.bus_route_tag ? order.bus_route_tag.toUpperCase() : 'Assigning...'}</span>
+                  </div>
                   
                   {/* QR Code Section */}
                   <div className="detail-row highlight" style={{ flexDirection: 'column', alignItems: 'flex-start' }}>

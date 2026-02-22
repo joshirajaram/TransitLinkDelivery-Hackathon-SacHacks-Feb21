@@ -616,6 +616,14 @@ main {
   gap: 12px;
 }
 
+.order-accept-actions .btn-primary,
+.order-accept-actions .btn-secondary {
+  flex: 1;
+  margin-top: 0;
+  height: 48px;
+}
+
+
 .order-header {
   display: flex;
   justify-content: space-between;

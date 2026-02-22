@@ -31,33 +31,6 @@ export default function UnitransManagerDashboard() {
     }
   };
 
-  const handleStatusChange = async (orderId: number, nextStatus: string) => {
-    setLoading(true);
-    setError(null);
-    try {
-      const routeTag = nextStatus === 'ON_BUS' ? route.trim() : undefined;
-      await apiClient.updateOrderStatus(orderId, nextStatus, routeTag || undefined);
-      await loadOrders();
-    } catch (err: any) {
-      setError(err.response?.data?.detail || 'Failed to update status');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const getNextStatus = (status: string) => {
-    switch (status) {
-      case 'READY_FOR_PICKUP':
-        return 'ON_BUS';
-      case 'ON_BUS':
-        return 'AT_STOP';
-      case 'AT_STOP':
-        return 'COMPLETED';
-      default:
-        return null;
-    }
-  };
-
   useEffect(() => {
     loadOrders();
     const interval = setInterval(loadOrders, 12000);
@@ -72,7 +45,8 @@ export default function UnitransManagerDashboard() {
   return (
     <div className="restaurant-dashboard">
       <h2>🚌 Unitrans Order Manager</h2>
-      <p className="subtitle">Monitor active routes and completed deliveries</p>
+      <p className="subtitle">Monitor downtown pickups and delivery history</p>
+      <p className="subtitle">Use Steward Scan to load and complete orders</p>
 
       <div className="scan-section">
         <div className="input-group">
@@ -116,9 +90,27 @@ export default function UnitransManagerDashboard() {
           ) : filteredActive.length === 0 ? (
             <p className="empty-state">No active orders for this route.</p>
           ) : (
-            filteredActive.map(order => {
-              const nextStatus = getNextStatus(order.status);
-              const isOnBus = nextStatus === 'ON_BUS';
+            <>
+              <div className="order-card">
+                <div className="order-header">
+                  <h3>Downtown Pickup List</h3>
+                </div>
+                <div className="order-details">
+                  {filteredActive.filter(order => order.status === 'READY_FOR_PICKUP').length === 0 ? (
+                    <p className="empty-state">No ready orders to load.</p>
+                  ) : (
+                    filteredActive
+                      .filter(order => order.status === 'READY_FOR_PICKUP')
+                      .map(order => (
+                        <div key={`pickup-${order.id}`} className="detail-row">
+                          <span>Order #{order.id}</span>
+                          <span>{order.stop.code} – {order.stop.name}</span>
+                        </div>
+                      ))
+                  )}
+                </div>
+              </div>
+              {filteredActive.map(order => {
               return (
               <div key={order.id} className="order-card">
                 <div className="order-header">
@@ -135,6 +127,10 @@ export default function UnitransManagerDashboard() {
                     <span>{order.stop.code} – {order.stop.name}</span>
                   </div>
                   <div className="detail-row">
+                    <span>Route:</span>
+                    <span>{order.bus_route_tag?.toUpperCase() || 'Unassigned'}</span>
+                  </div>
+                  <div className="detail-row">
                     <span>Window:</span>
                     <span>{order.window.label} ({order.window.start_time.slice(0, 5)}–{order.window.end_time.slice(0, 5)})</span>
                   </div>
@@ -143,18 +139,10 @@ export default function UnitransManagerDashboard() {
                     <span>{new Date(order.created_at).toLocaleString()}</span>
                   </div>
                 </div>
-                {nextStatus && (
-                  <button
-                    onClick={() => handleStatusChange(order.id, nextStatus)}
-                    className="btn-primary"
-                    disabled={loading || (isOnBus && !route.trim())}
-                  >
-                    {loading ? 'Updating...' : `Mark as ${nextStatus.replace(/_/g, ' ')}`}
-                  </button>
-                )}
               </div>
               );
-            })
+              })}
+            </>
           )}
         </div>
       )}

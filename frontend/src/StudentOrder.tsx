@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import Map, { Marker, NavigationControl } from 'react-map-gl';
 import 'mapbox-gl/dist/mapbox-gl.css';
-import { apiClient, Restaurant, Stop, Window, Order, User, BusLocation } from './api';
+import { apiClient, Restaurant, Stop, Window, Order, User, BusLocation, ClosestStopResponse } from './api';
 import { QRCode } from 'react-qrcode-logo';
 
 type StudentOrderProps = {
@@ -14,6 +14,9 @@ export default function StudentOrder({ mode = 'place' }: StudentOrderProps) {
   const [windows, setWindows] = useState<Window[]>([]);
   const [selectedRestaurant, setSelectedRestaurant] = useState<number | null>(null);
   const [selectedStop, setSelectedStop] = useState<number | null>(null);
+  const [userLocation, setUserLocation] = useState<{ latitude: number; longitude: number } | null>(null);
+  const [locationError, setLocationError] = useState<string | null>(null);
+  const [closestStop, setClosestStop] = useState<ClosestStopResponse | null>(null);
   const [selectedWindow, setSelectedWindow] = useState<number | null>(null);
   const [quantities, setQuantities] = useState<Record<number, number>>({});
   const [orders, setOrders] = useState<Order[]>([]);
@@ -169,7 +172,7 @@ export default function StudentOrder({ mode = 'place' }: StudentOrderProps) {
 
   const placeOrder = async () => {
     if (!selectedRestaurant || !selectedStop || !selectedWindow) {
-      setError('Please select restaurant, stop, and time window');
+      setError('Please select restaurant, location, and time window');
       return;
     }
 
@@ -220,6 +223,8 @@ export default function StudentOrder({ mode = 'place' }: StudentOrderProps) {
     setQuantities({});
     setSelectedRestaurant(null);
     setSelectedStop(null);
+    setClosestStop(null);
+    setUserLocation(null);
     setSelectedWindow(null);
   };
 
@@ -287,6 +292,40 @@ export default function StudentOrder({ mode = 'place' }: StudentOrderProps) {
     }
   };
 
+  const requestLocation = () => {
+    if (!navigator.geolocation) {
+      setLocationError('Geolocation is not supported in this browser.');
+      return;
+    }
+    setLocationError(null);
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        setUserLocation({ latitude: pos.coords.latitude, longitude: pos.coords.longitude });
+      },
+      () => setLocationError('Unable to retrieve your location. Please set it on the map.'),
+      { enableHighAccuracy: true, timeout: 10000 }
+    );
+  };
+
+  useEffect(() => {
+    if (!userLocation) {
+      setClosestStop(null);
+      setSelectedStop(null);
+      return;
+    }
+    apiClient.getClosestDowntownStop(userLocation.latitude, userLocation.longitude)
+      .then(res => {
+        setClosestStop(res.data);
+        setSelectedStop(res.data.stop.id);
+        setLocationError(null);
+      })
+      .catch(err => {
+        setClosestStop(null);
+        setSelectedStop(null);
+        setLocationError(err.response?.data?.detail || 'Unable to find a downtown stop.');
+      });
+  }, [userLocation]);
+
   return (
     <div className="student-order-view">
       <h2>Order via Unitrans</h2>
@@ -323,6 +362,9 @@ export default function StudentOrder({ mode = 'place' }: StudentOrderProps) {
                 <p><strong>Order #{activeOrder.id}</strong></p>
                 <p>Restaurant: {activeOrder.restaurant_name}</p>
                 <p>Pickup: {activeOrder.stop.name} ({activeOrder.stop.code})</p>
+                {activeOrder.bus_route_tag && (
+                  <p>Assigned Route: {activeOrder.bus_route_tag.toUpperCase()}</p>
+                )}
                 <p>Time Window: {activeOrder.window.label} ({activeOrder.window.start_time.slice(0, 5)}–{activeOrder.window.end_time.slice(0, 5)})</p>
                 <p>Placed: {formatDateTime(activeOrder.created_at)}</p>
                 {activeOrder.estimated_delivery_time && (
@@ -366,7 +408,12 @@ export default function StudentOrder({ mode = 'place' }: StudentOrderProps) {
                   <h3>Live Order Tracking</h3>
                   {activeOrder.status === 'ON_BUS' ? (
                     <>
-                      {!activeOrder.bus_id && <p>Bus assignment pending.</p>}
+                      {!activeOrder.bus_id && activeOrder.bus_route_tag && (
+                        <p>
+                          Assigned route {activeOrder.bus_route_tag.toUpperCase()}. Live bus location will appear once a bus reports.
+                        </p>
+                      )}
+                      {!activeOrder.bus_id && !activeOrder.bus_route_tag && <p>Bus assignment pending.</p>}
                       {activeOrder.bus_id && busLoading && <p>Loading live bus locations...</p>}
                       {activeOrder.bus_id && !busLoading && assignedBusLocations.length === 0 && (
                         <p>Assigned bus not reporting yet. Refreshing automatically.</p>
@@ -664,24 +711,69 @@ export default function StudentOrder({ mode = 'place' }: StudentOrderProps) {
             <div className="wizard-card-header">
               <span className="wizard-card-num">3</span>
               <div>
-                <h3>Choose Pickup Stop</h3>
-                <p>Which bus stop will you pick up at?</p>
+                <h3>Set Your Location</h3>
+                <p>We’ll assign the closest downtown bus stop for pickup.</p>
               </div>
               {selectedStop && <span className="wizard-card-check">✓</span>}
             </div>
-            <div className="stop-cards-list">
-              {stops.map(s => (
-                <button
-                  key={s.id}
-                  className={`stop-card ${selectedStop === s.id ? 'selected' : ''}`}
-                  onClick={() => setSelectedStop(s.id)}
-                >
-                  <span className="stop-icon">🚏</span>
-                  <span className="stop-code">{s.code}</span>
-                  <span className="stop-name">{s.name}</span>
-                  {selectedStop === s.id && <span className="stop-check">✓</span>}
+            <div className="scan-section">
+              <div className="input-group">
+                <button onClick={requestLocation} className="btn-primary">
+                  📍 Use My Location
                 </button>
-              ))}
+              </div>
+              {locationError && <p className="error-message">{locationError}</p>}
+            </div>
+            <div style={{ width: '100%', height: '280px', borderRadius: '12px', overflow: 'hidden' }}>
+              {mapboxToken ? (
+                <Map
+                  mapboxAccessToken={mapboxToken}
+                  initialViewState={{
+                    latitude: userLocation?.latitude ?? 38.5449,
+                    longitude: userLocation?.longitude ?? -121.7405,
+                    zoom: 13.5,
+                  }}
+                  mapStyle="mapbox://styles/mapbox/light-v11"
+                  style={{ width: '100%', height: '100%' }}
+                  onClick={(evt) => {
+                    setUserLocation({ latitude: evt.lngLat.lat, longitude: evt.lngLat.lng });
+                  }}
+                >
+                  <NavigationControl position="top-right" />
+                  {userLocation && (
+                    <Marker longitude={userLocation.longitude} latitude={userLocation.latitude} color="#1976d2" />
+                  )}
+                  {closestStop?.stop && (
+                    <Marker longitude={closestStop.stop.longitude} latitude={closestStop.stop.latitude} color="#2e7d32" />
+                  )}
+                </Map>
+              ) : (
+                <p>Set VITE_MAPBOX_TOKEN to enable map selection.</p>
+              )}
+            </div>
+            <div className="order-details" style={{ marginTop: '12px' }}>
+              <div className="detail-row">
+                <span>Closest Downtown Stop:</span>
+                <span>
+                  {closestStop
+                    ? `${closestStop.stop.name} (${closestStop.stop.code})`
+                    : 'Select your location to assign a stop.'}
+                </span>
+              </div>
+              {closestStop && (
+                <div className="detail-row">
+                  <span>Distance:</span>
+                  <span>{Math.round(closestStop.distance_m)} m</span>
+                </div>
+              )}
+              {closestStop && closestStop.distance_m > 500 && (
+                <div className="detail-row">
+                  <span></span>
+                  <span style={{ color: '#b45309', fontWeight: 600 }}>
+                    ⚠️ Pickup stop is over 500m away
+                  </span>
+                </div>
+              )}
             </div>
           </div>
 
@@ -734,7 +826,7 @@ export default function StudentOrder({ mode = 'place' }: StudentOrderProps) {
                 </div>
                 <div className="summary-row">
                   <span>Pickup Stop</span>
-                  <span>{stops.find(s => s.id === selectedStop)?.name ?? '—'}</span>
+                  <span>{closestStop?.stop.name ?? stops.find(s => s.id === selectedStop)?.name ?? '—'}</span>
                 </div>
                 <div className="summary-row">
                   <span>Time Window</span>
