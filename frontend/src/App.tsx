@@ -8,7 +8,7 @@ import RestaurantPage from './RestaurantPage'
 import Login from './Login'
 import { User } from './api'
 
-type View = 'map' | 'student' | 'steward' | 'restaurant' | 'central' | 'restaurant-page'
+type View = 'map' | 'student' | 'student-track' | 'steward' | 'restaurant' | 'central' | 'restaurant-page'
 
 export default function App() {
   const [user, setUser] = useState<User | null>(null)
@@ -72,7 +72,13 @@ export default function App() {
                 onClick={() => setView('student')}
                 className={view === 'student' ? 'active' : ''}
               >
-                📚 Student
+                📚 Place Order
+              </button>
+              <button 
+                onClick={() => setView('student-track')}
+                className={view === 'student-track' ? 'active' : ''}
+              >
+                🧾 Track Orders
               </button>
               <button 
                 onClick={() => setView('restaurant')}
@@ -109,6 +115,12 @@ export default function App() {
                 className={view === 'student' ? 'active' : ''}
               >
                 📚 Place Order
+              </button>
+              <button 
+                onClick={() => setView('student-track')}
+                className={view === 'student-track' ? 'active' : ''}
+              >
+                🧾 Track Orders
               </button>
               <button 
                 onClick={() => setView('map')}
@@ -158,7 +170,8 @@ export default function App() {
       </header>
       <section className="content">
         {view === 'central' && <CentralDashboard />}
-        {view === 'student' && <StudentOrder />}
+        {view === 'student' && <StudentOrder mode="place" />}
+        {view === 'student-track' && <StudentOrder mode="track" />}
         {view === 'steward' && <StewardScan />}
         {view === 'restaurant' && <RestaurantDashboard />}
         {view === 'restaurant-page' && <RestaurantPage restaurantId={selectedRestaurantId} />}

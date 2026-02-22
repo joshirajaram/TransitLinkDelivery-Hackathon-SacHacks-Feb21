@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from sqlalchemy import Boolean, Column, DateTime, Float, ForeignKey, Integer, String, Time, create_engine
+from sqlalchemy import Boolean, Column, DateTime, Float, ForeignKey, Integer, String, Time, create_engine, text
 from sqlalchemy.orm import declarative_base, relationship, sessionmaker
 from datetime import datetime
 
@@ -83,6 +83,7 @@ class OrderORM(Base):
     total_price_cents = Column(Integer, nullable=False)
     delivery_fee_cents = Column(Integer, nullable=False)
     status = Column(String, default="PENDING", nullable=False)
+    bus_id = Column(String, nullable=True)
     qr_code = Column(String, nullable=False, unique=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
@@ -108,3 +109,8 @@ class OrderItemORM(Base):
 
 def init_db() -> None:
     Base.metadata.create_all(bind=engine)
+    with engine.begin() as connection:
+        result = connection.execute(text("PRAGMA table_info(orders)"))
+        columns = {row[1] for row in result.fetchall()}
+        if "bus_id" not in columns:
+            connection.execute(text("ALTER TABLE orders ADD COLUMN bus_id VARCHAR"))

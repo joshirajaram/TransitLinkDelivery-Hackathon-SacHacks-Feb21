@@ -1,8 +1,14 @@
-import { useEffect, useState } from 'react';
-import { apiClient, Restaurant, Stop, Window, Order, User } from './api';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import Map, { Marker, NavigationControl } from 'react-map-gl';
+import 'mapbox-gl/dist/mapbox-gl.css';
+import { apiClient, Restaurant, Stop, Window, Order, User, BusLocation } from './api';
 import { QRCode } from 'react-qrcode-logo';
 
-export default function StudentOrder() {
+type StudentOrderProps = {
+  mode?: 'track' | 'place';
+};
+
+export default function StudentOrder({ mode = 'place' }: StudentOrderProps) {
   const [restaurants, setRestaurants] = useState<Restaurant[]>([]);
   const [stops, setStops] = useState<Stop[]>([]);
   const [windows, setWindows] = useState<Window[]>([]);
@@ -10,12 +16,79 @@ export default function StudentOrder() {
   const [selectedStop, setSelectedStop] = useState<number | null>(null);
   const [selectedWindow, setSelectedWindow] = useState<number | null>(null);
   const [quantities, setQuantities] = useState<Record<number, number>>({});
-  const [order, setOrder] = useState<Order | null>(null);
+  const [orders, setOrders] = useState<Order[]>([]);
+  const [ordersLoading, setOrdersLoading] = useState(false);
+  const [lastOrdersRefresh, setLastOrdersRefresh] = useState<Date | null>(null);
+  const [busLocations, setBusLocations] = useState<BusLocation[]>([]);
+  const [busLoading, setBusLoading] = useState(false);
+  const [lastBusRefresh, setLastBusRefresh] = useState<Date | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   
   // Get current user
-  const user: User | null = JSON.parse(localStorage.getItem('user') || 'null');
+  const user: User | null = useMemo(
+    () => JSON.parse(localStorage.getItem('user') || 'null'),
+    []
+  );
+
+  const refreshOrders = useCallback(async (showLoading = false) => {
+    if (!user) {
+      return;
+    }
+    if (showLoading) {
+      setOrdersLoading(true);
+    }
+    try {
+      const res = await apiClient.getMyOrders();
+      setOrders(res.data);
+      setLastOrdersRefresh(new Date());
+    } catch (err: any) {
+      setError(err.response?.data?.detail || 'Failed to load orders');
+    } finally {
+      if (showLoading) {
+        setOrdersLoading(false);
+      }
+    }
+  }, [user?.id]);
+
+  const refreshBusLocations = useCallback(async (showLoading = false) => {
+    if (showLoading) {
+      setBusLoading(true);
+    }
+    try {
+      const res = await apiClient.getBusLocations();
+      setBusLocations(res.data);
+      setLastBusRefresh(new Date());
+    } catch (err: any) {
+      setError(err.response?.data?.detail || 'Failed to load bus locations');
+    } finally {
+      if (showLoading) {
+        setBusLoading(false);
+      }
+    }
+  }, []);
+
+  const activeOrder = useMemo(
+    () => orders.find(o => !['COMPLETED', 'COMPLETE', 'CANCELLED'].includes(o.status)),
+    [orders]
+  );
+
+  const sortedOrders = useMemo(
+    () => [...orders].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()),
+    [orders]
+  );
+
+  const assignedBusLocations = useMemo(() => {
+    if (!activeOrder?.bus_id) {
+      return [];
+    }
+    return busLocations.filter((bus) => bus.vehicle_id === activeOrder.bus_id);
+  }, [activeOrder?.bus_id, busLocations]);
+
+  const formatDateTime = (value: string) => {
+    const date = new Date(value);
+    return date.toLocaleString();
+  };
 
   useEffect(() => {
     Promise.all([
@@ -30,6 +103,25 @@ export default function StudentOrder() {
       setError('Failed to load data: ' + err.message);
     });
   }, []);
+
+  useEffect(() => {
+    if (!user) {
+      return;
+    }
+    refreshOrders(true);
+    const interval = setInterval(() => refreshOrders(false), 10000);
+    return () => clearInterval(interval);
+  }, [refreshOrders, user]);
+
+  useEffect(() => {
+    if (!activeOrder || activeOrder.status !== 'ON_BUS') {
+      setBusLocations([]);
+      return;
+    }
+    refreshBusLocations(true);
+    const interval = setInterval(() => refreshBusLocations(false), 15000);
+    return () => clearInterval(interval);
+  }, [activeOrder, refreshBusLocations]);
 
   const currentRestaurant = restaurants.find(r => r.id === selectedRestaurant);
 
@@ -66,7 +158,9 @@ export default function StudentOrder() {
         window_id: selectedWindow,
         items,
       });
-      setOrder(res.data);
+      setOrders(prev => [res.data, ...prev]);
+      refreshOrders(false);
+      resetOrder();
     } catch (err: any) {
       setError(err.response?.data?.detail || 'Failed to place order');
     } finally {
@@ -75,15 +169,18 @@ export default function StudentOrder() {
   };
 
   const resetOrder = () => {
-    setOrder(null);
     setQuantities({});
     setSelectedRestaurant(null);
     setSelectedStop(null);
     setSelectedWindow(null);
   };
 
+  const mapboxToken = import.meta.env.VITE_MAPBOX_TOKEN || '';
+
+  const normalizeStatus = (status: string) => (status === 'COMPLETE' ? 'COMPLETED' : status);
+
   const getStatusMessage = (status: string): string => {
-    switch (status) {
+    switch (normalizeStatus(status)) {
       case 'ACCEPTED': return '✅ Order received by restaurant';
       case 'PREPARING': return '👨‍🍳 Your food is being prepared';
       case 'READY_FOR_PICKUP': return '📦 Order ready, waiting for steward pickup';
@@ -95,7 +192,7 @@ export default function StudentOrder() {
   };
 
   const getETA = (status: string): string => {
-    switch (status) {
+    switch (normalizeStatus(status)) {
       case 'ACCEPTED': return '25-35 min';
       case 'PREPARING': return '20-30 min';
       case 'READY_FOR_PICKUP': return '15-20 min';
@@ -107,7 +204,7 @@ export default function StudentOrder() {
   };
 
   const getProgressPercentage = (status: string): number => {
-    switch (status) {
+    switch (normalizeStatus(status)) {
       case 'ACCEPTED': return 20;
       case 'PREPARING': return 40;
       case 'READY_FOR_PICKUP': return 60;
@@ -118,82 +215,6 @@ export default function StudentOrder() {
     }
   };
 
-  if (order) {
-    return (
-      <div className="student-order-view">
-        <div className="order-confirmation">
-          <h2>✅ Order Confirmed!</h2>
-          <div className="order-details">
-            <p><strong>Order #{order.id}</strong></p>
-            <p>Restaurant: {order.restaurant_name}</p>
-            <p>Pickup: {order.stop.name} ({order.stop.code})</p>
-            <p>Time Window: {order.window.label} ({order.window.start_time.slice(0, 5)}–{order.window.end_time.slice(0, 5)})</p>
-            
-            <div className="status-tracker">
-              <div className="progress-bar-container">
-                <div 
-                  className="progress-bar-fill" 
-                  style={{ width: `${getProgressPercentage(order.status)}%` }}
-                ></div>
-              </div>
-              
-              <div className="status-current">
-                <span className="status-badge">{order.status}</span>
-                <p className="status-message">{getStatusMessage(order.status)}</p>
-              </div>
-              {order.status !== 'COMPLETED' && order.status !== 'CANCELLED' && (
-                <div className="eta-display">
-                  <span className="eta-label">⏱️ Estimated Time:</span>
-                  <span className="eta-value">{getETA(order.status)}</span>
-                </div>
-              )}
-            </div>
-            
-            <div className="order-items">
-              <h3>Items:</h3>
-              {order.items.map((item, idx) => (
-                <div key={idx} className="order-item">
-                  {item.quantity}x {item.menu_item_name} - ${(item.price_cents / 100).toFixed(2)}
-                </div>
-              ))}
-            </div>
-
-            <div className="order-pricing">
-              <div className="price-row">
-                <span>Food Total:</span>
-                <span>${(order.total_price_cents / 100).toFixed(2)}</span>
-              </div>
-              <div className="price-row">
-                <span>Delivery Fee:</span>
-                <span>${(order.delivery_fee_cents / 100).toFixed(2)}</span>
-              </div>
-              <div className="price-row total">
-                <span><strong>Total:</strong></span>
-                <span><strong>${((order.total_price_cents + order.delivery_fee_cents) / 100).toFixed(2)}</strong></span>
-              </div>
-            </div>
-
-            <div className="qr-section">
-              <h3>Show this at the bus stop:</h3>
-              <div className="qr-code-wrapper">
-                <QRCode 
-                  value={order.qr_code}
-                  size={200}
-                  bgColor="#ffffff"
-                  fgColor="#000000"
-                  ecLevel="M"
-                />
-              </div>
-              <p className="qr-code-text">Code: <strong>{order.qr_code}</strong></p>
-            </div>
-
-            <button onClick={resetOrder} className="btn-secondary">Place Another Order</button>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div className="student-order-view">
       <h2>Order via Unitrans</h2>
@@ -201,90 +222,249 @@ export default function StudentOrder() {
 
       {error && <div className="error-message">{error}</div>}
 
-      <div className="order-form">
-        <div className="form-section">
-          <h3>1. Choose Restaurant</h3>
-          <select
-            value={selectedRestaurant ?? ''}
-            onChange={e => setSelectedRestaurant(Number(e.target.value))}
-            className="select-input"
-          >
-            <option value="">-- Select Restaurant --</option>
-            {restaurants.map(r => (
-              <option key={r.id} value={r.id}>
-                {r.name} {r.description && `- ${r.description}`}
-              </option>
-            ))}
-          </select>
-        </div>
+      {mode === 'track' && (
+        <>
+          {activeOrder ? (
+            <div className="order-confirmation">
+              <h2>📡 Current Active Order</h2>
+              <div className="order-details">
+                <p><strong>Order #{activeOrder.id}</strong></p>
+                <p>Restaurant: {activeOrder.restaurant_name}</p>
+                <p>Pickup: {activeOrder.stop.name} ({activeOrder.stop.code})</p>
+                <p>Time Window: {activeOrder.window.label} ({activeOrder.window.start_time.slice(0, 5)}–{activeOrder.window.end_time.slice(0, 5)})</p>
+                <p>Placed: {formatDateTime(activeOrder.created_at)}</p>
 
-        {currentRestaurant && (
-          <div className="form-section">
-            <h3>2. Choose Items</h3>
-            <div className="menu-items">
-              {currentRestaurant.menu_items.map(mi => (
-                <div key={mi.id} className="menu-item">
-                  <div className="menu-item-info">
-                    <strong>{mi.name}</strong>
-                    {mi.description && <p className="item-description">{mi.description}</p>}
-                    <span className="item-price">${(mi.price_cents / 100).toFixed(2)}</span>
+                <div className="status-tracker">
+                  <div className="progress-bar-container">
+                    <div
+                      className="progress-bar-fill"
+                      style={{ width: `${getProgressPercentage(activeOrder.status)}%` }}
+                    ></div>
                   </div>
-                  <input
-                    type="number"
-                    min={0}
-                    value={quantities[mi.id] ?? 0}
-                    onChange={e => handleQuantityChange(mi.id, Number(e.target.value))}
-                    className="quantity-input"
-                  />
+
+                  <div className="status-current">
+                    <span className="status-badge">{activeOrder.status}</span>
+                    <p className="status-message">{getStatusMessage(activeOrder.status)}</p>
+                  </div>
+                  {activeOrder.status !== 'COMPLETED' && activeOrder.status !== 'CANCELLED' && (
+                    <div className="eta-display">
+                      <span className="eta-label">⏱️ Estimated Time:</span>
+                      <span className="eta-value">{getETA(activeOrder.status)}</span>
+                    </div>
+                  )}
                 </div>
-              ))}
+
+                <div className="order-items">
+                  <h3>Live Order Tracking</h3>
+                  {activeOrder.status === 'ON_BUS' ? (
+                    <>
+                      {!activeOrder.bus_id && <p>Bus assignment pending.</p>}
+                      {activeOrder.bus_id && busLoading && <p>Loading live bus locations...</p>}
+                      {activeOrder.bus_id && !busLoading && assignedBusLocations.length === 0 && (
+                        <p>Assigned bus not reporting yet. Refreshing automatically.</p>
+                      )}
+                      {mapboxToken ? (
+                        <div style={{ width: '100%', height: '320px', borderRadius: '12px', overflow: 'hidden' }}>
+                          <Map
+                            mapboxAccessToken={mapboxToken}
+                            initialViewState={{
+                              latitude: activeOrder.stop.latitude,
+                              longitude: activeOrder.stop.longitude,
+                              zoom: 13.2,
+                            }}
+                            mapStyle="mapbox://styles/mapbox/light-v11"
+                            style={{ width: '100%', height: '100%' }}>
+                            <NavigationControl position="top-right" />
+                            <Marker
+                              longitude={activeOrder.stop.longitude}
+                              latitude={activeOrder.stop.latitude}
+                              color="#1976d2"
+                            />
+                            {assignedBusLocations.map((bus) => (
+                              <Marker
+                                key={bus.vehicle_id}
+                                longitude={bus.longitude}
+                                latitude={bus.latitude}
+                                color="#d32f2f"
+                              />
+                            ))}
+                          </Map>
+                        </div>
+                      ) : (
+                        <p>Set VITE_MAPBOX_TOKEN to enable map tracking.</p>
+                      )}
+                      {activeOrder.bus_id && (
+                        <div className="eta-display">
+                          <span className="eta-label">🚌 Live bus updates</span>
+                          <span className="eta-value">
+                            {lastBusRefresh ? `Last refreshed ${lastBusRefresh.toLocaleTimeString()}` : 'Refreshing...'}
+                          </span>
+                        </div>
+                      )}
+                    </>
+                  ) : (
+                    <div className="live-status-blink">
+                      {activeOrder.status.toUpperCase()}
+                    </div>
+                  )}
+                </div>
+
+                <div className="order-items">
+                  <h3>Items:</h3>
+                  {activeOrder.items.map((item, idx) => (
+                    <div key={idx} className="order-item">
+                      {item.quantity}x {item.menu_item_name} - ${(item.price_cents / 100).toFixed(2)}
+                    </div>
+                  ))}
+                </div>
+
+                <div className="order-pricing">
+                  <div className="price-row">
+                    <span>Food Total:</span>
+                    <span>${(activeOrder.total_price_cents / 100).toFixed(2)}</span>
+                  </div>
+                  <div className="price-row">
+                    <span>Delivery Fee:</span>
+                    <span>${(activeOrder.delivery_fee_cents / 100).toFixed(2)}</span>
+                  </div>
+                  <div className="price-row total">
+                    <span><strong>Total:</strong></span>
+                    <span><strong>${((activeOrder.total_price_cents + activeOrder.delivery_fee_cents) / 100).toFixed(2)}</strong></span>
+                  </div>
+                </div>
+
+                <div className="qr-section">
+                  <h3>Show this at the bus stop:</h3>
+                  <div className="qr-code-wrapper">
+                    <QRCode
+                      value={activeOrder.qr_code}
+                      size={200}
+                      bgColor="#ffffff"
+                      fgColor="#000000"
+                      ecLevel="M"
+                    />
+                  </div>
+                  <p className="qr-code-text">Code: <strong>{activeOrder.qr_code}</strong></p>
+                </div>
+
+                <div className="eta-display">
+                  <span className="eta-label">🔄 Live status updates</span>
+                  <span className="eta-value">{lastOrdersRefresh ? `Last refreshed ${lastOrdersRefresh.toLocaleTimeString()}` : 'Refreshing...'}</span>
+                </div>
+              </div>
             </div>
-            <p className="delivery-fee-note">
-              Delivery fee: ${(currentRestaurant.delivery_fee_cents / 100).toFixed(2)}
-            </p>
+          ) : (
+            <div className="order-confirmation">
+              <h2>📡 Current Active Order</h2>
+              <div className="order-details">
+                <p>No active orders right now.</p>
+              </div>
+            </div>
+          )}
+
+          <div className="order-confirmation">
+            <h2>🧾 Order History</h2>
+            {ordersLoading && <p>Loading order history...</p>}
+            {!ordersLoading && sortedOrders.length === 0 && <p>No orders yet.</p>}
+            {sortedOrders.map(order => (
+              <div key={order.id} className="order-details">
+                <p><strong>Order #{order.id}</strong> {order.id === activeOrder?.id ? '(Active)' : ''}</p>
+                <p>{order.restaurant_name} → {order.stop.name} ({order.stop.code})</p>
+                <p>Window: {order.window.label} ({order.window.start_time.slice(0, 5)}–{order.window.end_time.slice(0, 5)})</p>
+                <p>Status: {order.status}</p>
+                <p>Placed: {formatDateTime(order.created_at)}</p>
+              </div>
+            ))}
           </div>
-        )}
+        </>
+      )}
 
-        <div className="form-section">
-          <h3>3. Choose Pickup Stop</h3>
-          <select
-            value={selectedStop ?? ''}
-            onChange={e => setSelectedStop(Number(e.target.value))}
-            className="select-input"
+      {mode === 'place' && (
+        <div className="order-form">
+          <div className="form-section">
+            <h3>1. Choose Restaurant</h3>
+            <select
+              value={selectedRestaurant ?? ''}
+              onChange={e => setSelectedRestaurant(Number(e.target.value))}
+              className="select-input"
+            >
+              <option value="">-- Select Restaurant --</option>
+              {restaurants.map(r => (
+                <option key={r.id} value={r.id}>
+                  {r.name} {r.description && `- ${r.description}`}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {currentRestaurant && (
+            <div className="form-section">
+              <h3>2. Choose Items</h3>
+              <div className="menu-items">
+                {currentRestaurant.menu_items.map(mi => (
+                  <div key={mi.id} className="menu-item">
+                    <div className="menu-item-info">
+                      <strong>{mi.name}</strong>
+                      {mi.description && <p className="item-description">{mi.description}</p>}
+                      <span className="item-price">${(mi.price_cents / 100).toFixed(2)}</span>
+                    </div>
+                    <input
+                      type="number"
+                      min={0}
+                      value={quantities[mi.id] ?? 0}
+                      onChange={e => handleQuantityChange(mi.id, Number(e.target.value))}
+                      className="quantity-input"
+                    />
+                  </div>
+                ))}
+              </div>
+              <p className="delivery-fee-note">
+                Delivery fee: ${(currentRestaurant.delivery_fee_cents / 100).toFixed(2)}
+              </p>
+            </div>
+          )}
+
+          <div className="form-section">
+            <h3>3. Choose Pickup Stop</h3>
+            <select
+              value={selectedStop ?? ''}
+              onChange={e => setSelectedStop(Number(e.target.value))}
+              className="select-input"
+            >
+              <option value="">-- Select Stop --</option>
+              {stops.map(s => (
+                <option key={s.id} value={s.id}>
+                  {s.code} – {s.name}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="form-section">
+            <h3>4. Choose Time Window</h3>
+            <select
+              value={selectedWindow ?? ''}
+              onChange={e => setSelectedWindow(Number(e.target.value))}
+              className="select-input"
+            >
+              <option value="">-- Select Window --</option>
+              {windows.map(w => (
+                <option key={w.id} value={w.id}>
+                  {w.label} ({w.start_time.slice(0, 5)}–{w.end_time.slice(0, 5)})
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <button 
+            onClick={placeOrder} 
+            disabled={loading || !selectedRestaurant || !selectedStop || !selectedWindow}
+            className="btn-primary"
           >
-            <option value="">-- Select Stop --</option>
-            {stops.map(s => (
-              <option key={s.id} value={s.id}>
-                {s.code} – {s.name}
-              </option>
-            ))}
-          </select>
+            {loading ? 'Placing Order...' : 'Place Order'}
+          </button>
         </div>
-
-        <div className="form-section">
-          <h3>4. Choose Time Window</h3>
-          <select
-            value={selectedWindow ?? ''}
-            onChange={e => setSelectedWindow(Number(e.target.value))}
-            className="select-input"
-          >
-            <option value="">-- Select Window --</option>
-            {windows.map(w => (
-              <option key={w.id} value={w.id}>
-                {w.label} ({w.start_time.slice(0, 5)}–{w.end_time.slice(0, 5)})
-              </option>
-            ))}
-          </select>
-        </div>
-
-        <button 
-          onClick={placeOrder} 
-          disabled={loading || !selectedRestaurant || !selectedStop || !selectedWindow}
-          className="btn-primary"
-        >
-          {loading ? 'Placing Order...' : 'Place Order'}
-        </button>
-      </div>
+      )}
     </div>
   );
 }

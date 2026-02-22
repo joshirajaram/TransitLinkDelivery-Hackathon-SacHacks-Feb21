@@ -13,6 +13,7 @@ import xmltodict
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+from sqlalchemy import desc
 from sqlalchemy.orm import Session
 
 from .auth import (
@@ -296,6 +297,7 @@ class OrderOut(BaseModel):
     total_price_cents: int
     delivery_fee_cents: int
     status: str
+    bus_id: str | None = None
     qr_code: str
     created_at: datetime
     items: list[OrderItemOut]
@@ -401,6 +403,7 @@ def get_dashboard_data(
             total_price_cents=order.total_price_cents,
             delivery_fee_cents=order.delivery_fee_cents,
             status=order.status,
+            bus_id=order.bus_id,
             qr_code=order.qr_code,
             created_at=order.created_at,
             items=[
@@ -662,7 +665,9 @@ def create_order(
         
         if best_bus:
             logger.info(f"Order {order.id} matched to bus {best_bus['bus_id']} with confidence {best_bus['confidence']}")
-            # TODO: Store bus assignment in database (add bus_id field to OrderORM)
+            order.bus_id = str(best_bus.get("bus_id"))
+            db.commit()
+            db.refresh(order)
     except Exception as e:
         logger.error(f"Failed to assign bus to order {order.id}: {e}")
         # Continue without bus assignment - can be done later
@@ -678,6 +683,7 @@ def create_order(
         total_price_cents=order.total_price_cents,
         delivery_fee_cents=order.delivery_fee_cents,
         status=order.status,
+        bus_id=order.bus_id,
         qr_code=order.qr_code,
         created_at=order.created_at,
         items=[
@@ -690,6 +696,45 @@ def create_order(
             for oi in order.items
         ],
     )
+
+
+@app.get("/orders/my", response_model=list[OrderOut])
+def get_my_orders(
+    current_user: CurrentUser = Depends(require_student),
+    db: Session = Depends(get_db)
+):
+    orders = (
+        db.query(OrderORM)
+        .filter(OrderORM.student_id == current_user.id)
+        .order_by(desc(OrderORM.created_at))
+        .all()
+    )
+    return [
+        OrderOut(
+            id=order.id,
+            student_id=order.student_id,
+            restaurant_id=order.restaurant_id,
+            restaurant_name=order.restaurant.name,
+            stop=StopOut.model_validate(order.stop),
+            window=WindowOut.model_validate(order.window),
+            total_price_cents=order.total_price_cents,
+            delivery_fee_cents=order.delivery_fee_cents,
+            status=order.status,
+            bus_id=order.bus_id,
+            qr_code=order.qr_code,
+            created_at=order.created_at,
+            items=[
+                OrderItemOut(
+                    menu_item_id=oi.menu_item_id,
+                    menu_item_name=oi.menu_item.name,
+                    quantity=oi.quantity,
+                    price_cents=oi.price_cents,
+                )
+                for oi in order.items
+            ],
+        )
+        for order in orders
+    ]
 
 
 @app.get("/restaurants/{restaurant_id}/orders", response_model=list[OrderOut])
@@ -720,6 +765,7 @@ def restaurant_orders(
                 total_price_cents=order.total_price_cents,
                 delivery_fee_cents=order.delivery_fee_cents,
                 status=order.status,
+                bus_id=order.bus_id,
                 qr_code=order.qr_code,
                 created_at=order.created_at,
                 items=[
@@ -770,6 +816,7 @@ def update_order_status(
         total_price_cents=order.total_price_cents,
         delivery_fee_cents=order.delivery_fee_cents,
         status=order.status,
+        bus_id=order.bus_id,
         qr_code=order.qr_code,
         created_at=order.created_at,
         items=[
@@ -811,6 +858,7 @@ def steward_scan(
         total_price_cents=order.total_price_cents,
         delivery_fee_cents=order.delivery_fee_cents,
         status=order.status,
+        bus_id=order.bus_id,
         qr_code=order.qr_code,
         created_at=order.created_at,
         items=[
@@ -856,6 +904,7 @@ def get_order(
         total_price_cents=order.total_price_cents,
         delivery_fee_cents=order.delivery_fee_cents,
         status=order.status,
+        bus_id=order.bus_id,
         qr_code=order.qr_code,
         created_at=order.created_at,
         items=[

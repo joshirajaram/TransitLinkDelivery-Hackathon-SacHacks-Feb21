@@ -79,6 +79,16 @@ export interface Window {
   end_time: string;
 }
 
+export interface BusLocation {
+  vehicle_id: string;
+  route_tag: string;
+  latitude: number;
+  longitude: number;
+  heading?: number | null;
+  speed_kmh?: number | null;
+  last_reported_epoch_ms?: number | null;
+}
+
 export interface OrderItem {
   menu_item_id: number;
   menu_item_name: string;
@@ -96,6 +106,7 @@ export interface Order {
   total_price_cents: number;
   delivery_fee_cents: number;
   status: string;
+  bus_id?: string | null;
   qr_code: string;
   created_at: string;
   items: OrderItem[];
@@ -126,8 +137,10 @@ export const apiClient = {
   getWindows: () => api.get<Window[]>('/windows'),
   createOrder: (data: CreateOrderRequest) => api.post<Order>('/orders', data),
   getOrder: (orderId: number) => api.get<Order>(`/orders/${orderId}`),
+  getMyOrders: () => api.get<Order[]>('/orders/my'),
   getRestaurantOrders: (restaurantId: number) => api.get<Order[]>(`/restaurants/${restaurantId}/orders`),
   updateOrderStatus: (orderId: number, status: string) => api.patch<Order>(`/orders/${orderId}/status`, { status }),
   stewardScan: (qrCode: string) => api.post<Order>('/steward/scan', { qr_code: qrCode }),
   getDashboardData: () => api.get('/admin/dashboard'),
+  getBusLocations: () => api.get<BusLocation[]>('/bus-locations'),
 };
