@@ -6,9 +6,7 @@ const STATUS_ORDER = [
   'ACCEPTED',
   'PREPARING',
   'READY_FOR_PICKUP',
-  'ON_BUS',
-  'AT_STOP',
-  'COMPLETED',
+  'NOT_ACCEPTED',
   'CANCELLED'
 ];
 
@@ -86,6 +84,14 @@ export default function RestaurantDashboard() {
     }
   };
 
+  const handleDecision = async (orderId: number, accepted: boolean) => {
+    if (accepted) {
+      await handleStatusChange(orderId, 'PREPARING');
+    } else {
+      await handleStatusChange(orderId, 'NOT_ACCEPTED');
+    }
+  };
+
   const getNextStatus = (currentStatus: string): string | null => {
     const currentIndex = STATUS_ORDER.indexOf(currentStatus);
     if (currentIndex === -1 || currentIndex >= STATUS_ORDER.length - 2) return null;
@@ -101,6 +107,7 @@ export default function RestaurantDashboard() {
       case 'ON_BUS': return '#FF9800';
       case 'AT_STOP': return '#3F51B5';
       case 'COMPLETED': return '#4CAF50';
+      case 'NOT_ACCEPTED': return '#EF4444';
       case 'CANCELLED': return '#F44336';
       default: return '#757575';
     }
@@ -136,7 +143,7 @@ export default function RestaurantDashboard() {
           <div className="stat-label">Total Orders</div>
         </div>
         <div className="stat-card">
-          <div className="stat-number">{orders.filter(o => ['PENDING', 'ACCEPTED', 'PREPARING'].includes(o.status)).length}</div>
+          <div className="stat-number">{orders.filter(o => ['PENDING', 'ACCEPTED', 'PREPARING', 'READY_FOR_PICKUP', 'ON_BUS', 'AT_STOP'].includes(o.status)).length}</div>
           <div className="stat-label">Active</div>
         </div>
         <div className="stat-card">
@@ -245,16 +252,36 @@ export default function RestaurantDashboard() {
                   </div>
                 </div>
 
-                {nextStatus && order.status !== 'COMPLETED' && order.status !== 'CANCELLED' && (
+                {order.status === 'PENDING' ? (
+                  <div className="order-accept">
+                    <span className="order-accept-label">Accept this order?</span>
+                    <div className="order-accept-actions">
+                      <button
+                        onClick={() => handleDecision(order.id, true)}
+                        disabled={updating === order.id}
+                        className="btn-primary"
+                      >
+                        {updating === order.id ? 'Updating...' : 'Accept'}
+                      </button>
+                      <button
+                        onClick={() => handleDecision(order.id, false)}
+                        disabled={updating === order.id}
+                        className="btn-secondary"
+                      >
+                        Decline
+                      </button>
+                    </div>
+                  </div>
+                ) : order.status === 'PREPARING' ? (
                   <button
-                    onClick={() => handleStatusChange(order.id, nextStatus)}
+                    onClick={() => handleStatusChange(order.id, 'READY_FOR_PICKUP')}
                     disabled={updating === order.id}
                     className="btn-primary"
                     style={{ marginTop: '12px', width: '100%' }}
                   >
-                    {updating === order.id ? 'Updating...' : `Mark as ${nextStatus.replace(/_/g, ' ')}`}
+                    {updating === order.id ? 'Updating...' : 'Mark as READY FOR PICKUP'}
                   </button>
-                )}
+                ) : null}
               </div>
             );
           })

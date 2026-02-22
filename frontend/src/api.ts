@@ -83,6 +83,7 @@ export interface Stop {
 
 export interface Window {
   id: number;
+  bus_route_tag?: string | null;
   label: string;
   start_time: string;
   end_time: string;
@@ -116,6 +117,7 @@ export interface Order {
   delivery_fee_cents: number;
   status: string;
   bus_id?: string | null;
+  bus_route_tag?: string | null;
   qr_code: string;
   created_at: string;
   estimated_delivery_time?: string;
@@ -124,6 +126,11 @@ export interface Order {
   on_bus_at?: string;
   completed_at?: string;
   items: OrderItem[];
+}
+
+export interface StewardOrdersResponse {
+  active_orders: Order[];
+  completed_orders: Order[];
 }
 
 export interface CreateOrderRequest {
@@ -160,9 +167,14 @@ export const apiClient = {
   getOrder: (orderId: number) => api.get<Order>(`/orders/${orderId}`),
   getMyOrders: () => api.get<Order[]>('/orders/my'),
   getRestaurantOrders: (restaurantId: number) => api.get<Order[]>(`/restaurants/${restaurantId}/orders`),
-  updateOrderStatus: (orderId: number, status: string) => api.patch<Order>(`/orders/${orderId}/status`, { status }),
+  updateOrderStatus: (orderId: number, status: string, busRouteTag?: string) =>
+    api.patch<Order>(`/orders/${orderId}/status`, { status, bus_route_tag: busRouteTag }),
   getOrderQRCode: (orderId: number) => api.get<any>(`/orders/${orderId}/qr-code`).then(res => res.data),
   stewardScan: (qrCode: string) => api.post<Order>('/steward/scan', { qr_code: qrCode }),
+  getStewardOrders: (route?: string) =>
+    api.get<StewardOrdersResponse>('/steward/orders', {
+      params: route ? { route } : undefined,
+    }),
   getDashboardData: () => api.get('/admin/dashboard'),
   getBusLocations: () => api.get<BusLocation[]>('/bus-locations'),
 };

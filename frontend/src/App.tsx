@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import MapView from './Map'
 import StudentOrder from './StudentOrder'
 import StewardScan from './StewardScan'
+import UnitransManagerDashboard from './UnitransManagerDashboard'
 import RestaurantDashboard from './RestaurantDashboard'
 import CentralDashboard from './CentralDashboard'
 import RestaurantPage from './RestaurantPage'
@@ -9,7 +10,7 @@ import Login from './Login'
 import Signup from './Signup'
 import { User } from './api'
 
-type View = 'map' | 'student' | 'student-track' | 'steward' | 'restaurant' | 'central' | 'restaurant-page'
+type View = 'map' | 'student' | 'student-track' | 'steward' | 'manager' | 'restaurant' | 'central' | 'restaurant-page'
 type AuthView = 'login' | 'signup'
 
 export default function App() {
@@ -37,7 +38,7 @@ export default function App() {
     if (loggedInUser.role === 'ADMIN') setView('central')
     else if (loggedInUser.role === 'STUDENT') setView('student')
     else if (loggedInUser.role === 'RESTAURANT_OWNER') setView('restaurant')
-    else if (loggedInUser.role === 'STEWARD') setView('steward')
+    else if (loggedInUser.role === 'STEWARD') setView('manager')
     else setView('student')
   }
 
@@ -96,6 +97,12 @@ export default function App() {
                 className={view === 'steward' ? 'active' : ''}
               >
                 🎒 ASUCD Steward
+              </button>
+              <button
+                onClick={() => setView('manager')}
+                className={view === 'manager' ? 'active' : ''}
+              >
+                🚌 Unitrans Manager
               </button>
               <button 
                 onClick={() => setView('map')}
@@ -158,6 +165,12 @@ export default function App() {
           {user.role === 'STEWARD' && (
             <>
               <button 
+                onClick={() => setView('manager')}
+                className={view === 'manager' ? 'active' : ''}
+              >
+                🚌 Unitrans Manager
+              </button>
+              <button 
                 onClick={() => setView('steward')}
                 className={view === 'steward' ? 'active' : ''}
               >
@@ -178,6 +191,7 @@ export default function App() {
         {view === 'student' && <StudentOrder mode="place" />}
         {view === 'student-track' && <StudentOrder mode="track" />}
         {view === 'steward' && <StewardScan />}
+        {view === 'manager' && <UnitransManagerDashboard />}
         {view === 'restaurant' && <RestaurantDashboard />}
         {view === 'restaurant-page' && <RestaurantPage restaurantId={selectedRestaurantId} />}
         {view === 'map' && (

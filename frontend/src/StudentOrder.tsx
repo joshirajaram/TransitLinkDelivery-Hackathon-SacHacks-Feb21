@@ -72,7 +72,7 @@ export default function StudentOrder({ mode = 'place' }: StudentOrderProps) {
   }, []);
 
   const activeOrder = useMemo(
-    () => orders.find(o => !['COMPLETED', 'COMPLETE', 'CANCELLED'].includes(o.status)),
+    () => orders.find(o => !['COMPLETED', 'COMPLETE', 'NOT_ACCEPTED', 'CANCELLED'].includes(o.status)),
     [orders]
   );
 
@@ -243,7 +243,10 @@ export default function StudentOrder({ mode = 'place' }: StudentOrderProps) {
 
   const mapboxToken = import.meta.env.VITE_MAPBOX_TOKEN || '';
 
-  const normalizeStatus = (status: string) => (status === 'COMPLETE' ? 'COMPLETED' : status);
+  const normalizeStatus = (status: string) => {
+    if (status === 'COMPLETE') return 'COMPLETED';
+    return status;
+  };
 
   const getStatusMessage = (status: string): string => {
     switch (normalizeStatus(status)) {
@@ -253,6 +256,7 @@ export default function StudentOrder({ mode = 'place' }: StudentOrderProps) {
       case 'ON_BUS': return '🚌 On the bus! Heading to your stop';
       case 'AT_STOP': return '📍 Arrived at your stop!';
       case 'COMPLETED': return '✨ Order delivered!';
+      case 'NOT_ACCEPTED': return '❌ Order not accepted. Refund is on the way.';
       default: return 'Processing...';
     }
   };
@@ -265,6 +269,7 @@ export default function StudentOrder({ mode = 'place' }: StudentOrderProps) {
       case 'ON_BUS': return '10-15 min';
       case 'AT_STOP': return '0-5 min';
       case 'COMPLETED': return 'Delivered';
+      case 'NOT_ACCEPTED': return 'Refunding';
       default: return 'Calculating...';
     }
   };
@@ -277,6 +282,7 @@ export default function StudentOrder({ mode = 'place' }: StudentOrderProps) {
       case 'ON_BUS': return 80;
       case 'AT_STOP': return 95;
       case 'COMPLETED': return 100;
+      case 'NOT_ACCEPTED': return 0;
       default: return 0;
     }
   };
@@ -387,8 +393,33 @@ export default function StudentOrder({ mode = 'place' }: StudentOrderProps) {
                                 key={bus.vehicle_id}
                                 longitude={bus.longitude}
                                 latitude={bus.latitude}
-                                color="#d32f2f"
-                              />
+                              >
+                                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                                  <div
+                                    style={{
+                                      background: '#d32f2f',
+                                      color: 'white',
+                                      fontSize: '11px',
+                                      fontWeight: 700,
+                                      padding: '2px 6px',
+                                      borderRadius: '10px',
+                                      marginBottom: '4px',
+                                      boxShadow: '0 2px 6px rgba(0,0,0,0.2)'
+                                    }}
+                                  >
+                                    {bus.route_tag || activeOrder.bus_route_tag || 'Bus'}
+                                  </div>
+                                  <div
+                                    style={{
+                                      width: '10px',
+                                      height: '10px',
+                                      background: '#d32f2f',
+                                      borderRadius: '50%',
+                                      boxShadow: '0 0 0 3px rgba(211,47,47,0.25)'
+                                    }}
+                                  ></div>
+                                </div>
+                              </Marker>
                             ))}
                           </Map>
                         </div>
@@ -474,6 +505,7 @@ export default function StudentOrder({ mode = 'place' }: StudentOrderProps) {
                 <p>{order.restaurant_name} → {order.stop.name} ({order.stop.code})</p>
                 <p>Window: {order.window.label} ({order.window.start_time.slice(0, 5)}–{order.window.end_time.slice(0, 5)})</p>
                 <p>Status: {order.status}</p>
+            {order.status === 'NOT_ACCEPTED' && <p>Order will be refunded.</p>}
                 <p>Placed: {formatDateTime(order.created_at)}</p>
               </div>
             ))}

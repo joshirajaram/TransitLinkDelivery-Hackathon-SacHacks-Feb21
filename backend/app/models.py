@@ -16,6 +16,7 @@ class OrderStatus(str, Enum):
     ON_BUS = "ON_BUS"
     AT_STOP = "AT_STOP"
     COMPLETED = "COMPLETED"
+    NOT_ACCEPTED = "NOT_ACCEPTED"
     CANCELLED = "CANCELLED"
 
 

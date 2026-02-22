@@ -86,6 +86,7 @@ class OrderORM(Base):
     delivery_fee_cents = Column(Integer, nullable=False)
     status = Column(String, default="PENDING", nullable=False)
     bus_id = Column(String, nullable=True)
+    bus_route_tag = Column(String, nullable=True)
     qr_code = Column(String, nullable=False, unique=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
@@ -116,6 +117,8 @@ def init_db() -> None:
         columns = {row[1] for row in result.fetchall()}
         if "bus_id" not in columns:
             connection.execute(text("ALTER TABLE orders ADD COLUMN bus_id VARCHAR"))
+        if "bus_route_tag" not in columns:
+            connection.execute(text("ALTER TABLE orders ADD COLUMN bus_route_tag VARCHAR"))
 
         result2 = connection.execute(text("PRAGMA table_info(restaurants)"))
         rcols = {row[1] for row in result2.fetchall()}

@@ -90,6 +90,30 @@ const Login = ({ onLogin, onSwitchToSignup }: LoginProps) => {
 
   return (
     <div className="login-container">
+      <div className="login-role-buttons">
+        <button
+          type="button"
+          className="role-quick-button"
+          onClick={() => {
+            setEmail('owner@tacomadavis.com');
+            setPassword('demo');
+            setError('');
+          }}
+        >
+          I’m a restaurant owner
+        </button>
+        <button
+          type="button"
+          className="role-quick-button"
+          onClick={() => {
+            setEmail('steward@ucdavis.edu');
+            setPassword('demo');
+            setError('');
+          }}
+        >
+          I’m a Unitrans order manager
+        </button>
+      </div>
       <div className="login-box">
         <div className="login-header">
           <h1>🚌 TransitLink Delivery</h1>
@@ -172,6 +196,33 @@ const Login = ({ onLogin, onSwitchToSignup }: LoginProps) => {
           justify-content: center;
           background: linear-gradient(135deg, #002855 0%, #1D4F91 100%);
           padding: 20px;
+          position: relative;
+        }
+
+        .login-role-buttons {
+          position: absolute;
+          top: 24px;
+          right: 24px;
+          display: flex;
+          gap: 12px;
+          flex-wrap: wrap;
+        }
+
+        .role-quick-button {
+          background: rgba(255, 255, 255, 0.9);
+          border: 1px solid rgba(226, 232, 240, 0.9);
+          color: #1e293b;
+          padding: 10px 14px;
+          border-radius: 999px;
+          font-size: 13px;
+          font-weight: 600;
+          cursor: pointer;
+          transition: transform 0.2s ease, box-shadow 0.2s ease;
+        }
+
+        .role-quick-button:hover {
+          transform: translateY(-1px);
+          box-shadow: 0 6px 16px rgba(15, 23, 42, 0.18);
         }
 
         .login-box {
@@ -398,6 +449,14 @@ const Login = ({ onLogin, onSwitchToSignup }: LoginProps) => {
         .signup-prompt a:hover {
           color: #002855;
           text-decoration: underline;
+        }
+
+        @media (max-width: 700px) {
+          .login-role-buttons {
+            position: static;
+            margin-bottom: 16px;
+            justify-content: center;
+          }
         }
       `}</style>
     </div>

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import base64
+import io
 import logging
 import secrets
 import time
@@ -9,11 +11,12 @@ from datetime import datetime, timedelta, time as dt_time
 from typing import Any
 
 import httpx
+import qrcode
 import xmltodict
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from sqlalchemy import desc
+from sqlalchemy import and_, desc, or_
 from sqlalchemy.orm import Session
 
 from .auth import (
@@ -367,7 +370,7 @@ def seed_demo_data(db: Session) -> None:
     if not db.query(DeliveryWindowORM).filter(DeliveryWindowORM.label == "Lunch").first():
         db.add(DeliveryWindowORM(label="Lunch",  start_time=dt_time(12, 0), end_time=dt_time(14, 0), is_active=True))
     if not db.query(DeliveryWindowORM).filter(DeliveryWindowORM.label == "Dinner").first():
-        db.add(DeliveryWindowORM(label="Dinner", start_time=dt_time(18, 0), end_time=dt_time(20, 0), is_active=True))
+        db.add(DeliveryWindowORM(label="Dinner", start_time=dt_time(18, 0), end_time=dt_time(22, 0), is_active=True))
 
     db.commit()
     logger.info("Demo data seeded successfully")
@@ -486,6 +489,7 @@ class OrderOut(BaseModel):
     delivery_fee_cents: int
     status: str
     bus_id: str | None = None
+    bus_route_tag: str | None = None
     qr_code: str
     created_at: datetime
     items: list[OrderItemOut]
@@ -496,10 +500,21 @@ class OrderOut(BaseModel):
 
 class UpdateStatusIn(BaseModel):
     status: str
+    bus_route_tag: str | None = None
 
 
 class QRScanIn(BaseModel):
     qr_code: str
+
+
+class StewardOrdersOut(BaseModel):
+    active_orders: list[OrderOut]
+    completed_orders: list[OrderOut]
+
+
+class OrderQRCodeOut(BaseModel):
+    qr_code: str
+    qr_data_url: str
 
 
 class DashboardStats(BaseModel):
@@ -592,6 +607,7 @@ def get_dashboard_data(
             delivery_fee_cents=order.delivery_fee_cents,
             status=order.status,
             bus_id=order.bus_id,
+            bus_route_tag=order.bus_route_tag,
             qr_code=order.qr_code,
             created_at=order.created_at,
             items=[
@@ -862,7 +878,7 @@ def create_order(
         window_id=payload.window_id,
         total_price_cents=total,
         delivery_fee_cents=restaurant.delivery_fee_cents,
-        status=OrderStatus.ACCEPTED.value,  # Auto-accept for demo
+        status=OrderStatus.PENDING.value,
         qr_code=qr_token,
     )
     db.add(order)
@@ -921,6 +937,7 @@ def create_order(
         delivery_fee_cents=order.delivery_fee_cents,
         status=order.status,
         bus_id=order.bus_id,
+        bus_route_tag=order.bus_route_tag,
         qr_code=order.qr_code,
         created_at=order.created_at,
         items=[
@@ -958,6 +975,7 @@ def get_my_orders(
             delivery_fee_cents=order.delivery_fee_cents,
             status=order.status,
             bus_id=order.bus_id,
+            bus_route_tag=order.bus_route_tag,
             qr_code=order.qr_code,
             created_at=order.created_at,
             items=[
@@ -1003,6 +1021,7 @@ def restaurant_orders(
                 delivery_fee_cents=order.delivery_fee_cents,
                 status=order.status,
                 bus_id=order.bus_id,
+                bus_route_tag=order.bus_route_tag,
                 qr_code=order.qr_code,
                 created_at=order.created_at,
                 items=[
@@ -1023,23 +1042,49 @@ def restaurant_orders(
 def update_order_status(
     order_id: int,
     payload: UpdateStatusIn,
-    current_user: CurrentUser = Depends(require_restaurant),
+    current_user: CurrentUser = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     order = db.query(OrderORM).filter(OrderORM.id == order_id).first()
     if not order:
         raise HTTPException(404, "Order not found")
-    
-    # Verify restaurant owns this order
-    restaurant = db.query(RestaurantORM).filter(
-        RestaurantORM.id == order.restaurant_id,
-        RestaurantORM.owner_id == current_user.id
-    ).first()
-    
-    if not restaurant:
-        raise HTTPException(403, "Access denied: Not your order")
-    
-    order.status = payload.status
+
+    next_status = payload.status
+
+    if current_user.role == UserRole.RESTAURANT_OWNER:
+        restaurant = db.query(RestaurantORM).filter(
+            RestaurantORM.id == order.restaurant_id,
+            RestaurantORM.owner_id == current_user.id
+        ).first()
+        if not restaurant:
+            raise HTTPException(403, "Access denied: Not your order")
+
+        allowed_transitions: dict[str, set[str]] = {
+            OrderStatus.PENDING.value: {OrderStatus.PREPARING.value, OrderStatus.NOT_ACCEPTED.value},
+            OrderStatus.ACCEPTED.value: {OrderStatus.PREPARING.value},
+            OrderStatus.PREPARING.value: {OrderStatus.READY_FOR_PICKUP.value},
+        }
+        if next_status not in allowed_transitions.get(order.status, set()):
+            raise HTTPException(400, f"Invalid status transition from {order.status} to {next_status}")
+        order.status = next_status
+    elif current_user.role == UserRole.STEWARD:
+        allowed_transitions: dict[str, set[str]] = {
+            OrderStatus.READY_FOR_PICKUP.value: {OrderStatus.ON_BUS.value},
+            OrderStatus.ON_BUS.value: {OrderStatus.AT_STOP.value},
+            OrderStatus.AT_STOP.value: {OrderStatus.COMPLETED.value},
+        }
+        if next_status not in allowed_transitions.get(order.status, set()):
+            raise HTTPException(400, f"Invalid status transition from {order.status} to {next_status}")
+        if next_status == OrderStatus.ON_BUS.value:
+            route_tag = (payload.bus_route_tag or "").strip()
+            if not route_tag:
+                raise HTTPException(400, "bus_route_tag is required when marking ON_BUS")
+            if order.bus_route_tag and order.bus_route_tag.lower() != route_tag.lower():
+                raise HTTPException(400, "Order already claimed by another route")
+            order.bus_route_tag = route_tag.lower()
+        order.status = next_status
+    else:
+        raise HTTPException(403, "Access denied")
     db.commit()
     db.refresh(order)
 
@@ -1054,6 +1099,7 @@ def update_order_status(
         delivery_fee_cents=order.delivery_fee_cents,
         status=order.status,
         bus_id=order.bus_id,
+        bus_route_tag=order.bus_route_tag,
         qr_code=order.qr_code,
         created_at=order.created_at,
         items=[
@@ -1096,6 +1142,7 @@ def steward_scan(
         delivery_fee_cents=order.delivery_fee_cents,
         status=order.status,
         bus_id=order.bus_id,
+        bus_route_tag=order.bus_route_tag,
         qr_code=order.qr_code,
         created_at=order.created_at,
         items=[
@@ -1107,6 +1154,69 @@ def steward_scan(
             )
             for oi in order.items
         ],
+    )
+
+
+@app.get("/steward/orders", response_model=StewardOrdersOut)
+async def get_steward_orders(
+    route: str | None = None,
+    current_user: CurrentUser = Depends(require_steward),
+    db: Session = Depends(get_db)
+):
+    if not route or not route.strip():
+        raise HTTPException(400, "route tag is required")
+    route_value = route.strip().lower()
+    active_statuses = [
+        OrderStatus.READY_FOR_PICKUP.value,
+        OrderStatus.ON_BUS.value,
+        OrderStatus.AT_STOP.value,
+    ]
+    active_query = db.query(OrderORM).filter(OrderORM.status.in_(active_statuses))
+    completed_query = db.query(OrderORM).filter(OrderORM.status == OrderStatus.COMPLETED.value)
+
+    active_query = active_query.filter(
+        or_(
+            and_(
+                OrderORM.status == OrderStatus.READY_FOR_PICKUP.value,
+                OrderORM.bus_route_tag.is_(None),
+            ),
+            OrderORM.bus_route_tag == route_value,
+        )
+    )
+    completed_query = completed_query.filter(OrderORM.bus_route_tag == route_value)
+
+    active_orders = active_query.order_by(OrderORM.created_at.desc()).all()
+    completed_orders = completed_query.order_by(OrderORM.created_at.desc()).all()
+
+    def build(order: OrderORM) -> OrderOut:
+        return OrderOut(
+            id=order.id,
+            student_id=order.student_id,
+            restaurant_id=order.restaurant_id,
+            restaurant_name=order.restaurant.name,
+            stop=StopOut.model_validate(order.stop),
+            window=WindowOut.model_validate(order.window),
+            total_price_cents=order.total_price_cents,
+            delivery_fee_cents=order.delivery_fee_cents,
+            status=order.status,
+            bus_id=order.bus_id,
+            bus_route_tag=order.bus_route_tag,
+            qr_code=order.qr_code,
+            created_at=order.created_at,
+            items=[
+                OrderItemOut(
+                    menu_item_id=oi.menu_item_id,
+                    menu_item_name=oi.menu_item.name,
+                    quantity=oi.quantity,
+                    price_cents=oi.price_cents,
+                )
+                for oi in order.items
+            ],
+        )
+
+    return StewardOrdersOut(
+        active_orders=[build(order) for order in active_orders],
+        completed_orders=[build(order) for order in completed_orders],
     )
 
 
@@ -1142,6 +1252,7 @@ def get_order(
         delivery_fee_cents=order.delivery_fee_cents,
         status=order.status,
         bus_id=order.bus_id,
+        bus_route_tag=order.bus_route_tag,
         qr_code=order.qr_code,
         created_at=order.created_at,
         items=[
@@ -1154,6 +1265,35 @@ def get_order(
             for oi in order.items
         ],
     )
+
+
+@app.get("/orders/{order_id}/qr-code", response_model=OrderQRCodeOut)
+def get_order_qr_code(
+    order_id: int,
+    current_user: CurrentUser = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    order = db.query(OrderORM).filter(OrderORM.id == order_id).first()
+    if not order:
+        raise HTTPException(404, "Order not found")
+
+    if current_user.role == "STUDENT" and order.student_id != current_user.id:
+        raise HTTPException(403, "Access denied: Not your order")
+    elif current_user.role == "RESTAURANT_OWNER":
+        restaurant = db.query(RestaurantORM).filter(
+            RestaurantORM.id == order.restaurant_id,
+            RestaurantORM.owner_id == current_user.id
+        ).first()
+        if not restaurant:
+            raise HTTPException(403, "Access denied: Not your order")
+
+    qr_img = qrcode.make(order.qr_code)
+    buffer = io.BytesIO()
+    qr_img.save(buffer, format="PNG")
+    encoded = base64.b64encode(buffer.getvalue()).decode("utf-8")
+    data_url = f"data:image/png;base64,{encoded}"
+
+    return OrderQRCodeOut(qr_code=order.qr_code, qr_data_url=data_url)
 
 
 # ========== Original Endpoints ==========
